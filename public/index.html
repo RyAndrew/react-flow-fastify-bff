@@ -144,30 +144,17 @@
 
         // ─── Modal Component ─────────────────────────────────────────────
 
-        const ActionModal = ({ show, onClose, title }) => {
-            const [progress, setProgress] = useState(0);
-
-            useEffect(() => {
-                if (!show) {
-                    setProgress(0);
-                    return;
-                }
-
-                const interval = setInterval(() => {
-                    setProgress(prev => {
-                        if (prev >= 100) {
-                            clearInterval(interval);
-                            setTimeout(onClose, 200);
-                            return 100;
-                        }
-                        return prev + (100 / 30);
-                    });
-                }, 100);
-
-                return () => clearInterval(interval);
-            }, [show, onClose]);
-
+        // status: 'idle' | 'running' | 'success' | 'error'
+        const ActionModal = ({ show, onClose, title, status, progress, error, result }) => {
             if (!show) return null;
+
+            const isFinished = status === 'success' || status === 'error';
+
+            const barClass = status === 'error'
+                ? 'progress-bar bg-danger'
+                : status === 'success'
+                    ? 'progress-bar bg-success'
+                    : 'progress-bar progress-bar-striped progress-bar-animated';
 
             return (
                 <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -175,18 +162,47 @@
                         <div className="modal-content">
                             <div className="modal-header">
                                 <h5 className="modal-title">{title}</h5>
+                                {isFinished && (
+                                    <button type="button" className="btn-close" onClick={onClose}></button>
+                                )}
                             </div>
                             <div className="modal-body text-center">
-                                <div className="spinner-border text-primary mb-3" role="status">
-                                    <span className="visually-hidden">Loading...</span>
+                                {status === 'running' && (
+                                    <div className="spinner-border text-primary mb-3" role="status">
+                                        <span className="visually-hidden">Loading...</span>
+                                    </div>
+                                )}
+                                {status === 'success' && (
+                                    <div className="text-success mb-3" style={{ fontSize: '2rem' }}>&#10003;</div>
+                                )}
+                                {status === 'error' && (
+                                    <div className="text-danger mb-3" style={{ fontSize: '2rem' }}>&#10007;</div>
+                                )}
+                                <div className="progress mb-3">
+                                    <div className={barClass} style={{ width: `${progress}%`, transition: 'width 0.3s ease' }}></div>
                                 </div>
-                                <div className="progress">
-                                    <div
-                                        className="progress-bar progress-bar-striped progress-bar-animated"
-                                        style={{ width: `${progress}%` }}
-                                    ></div>
-                                </div>
+                                {status === 'running' && (
+                                    <p className="text-muted mb-0">Calling Okta API...</p>
+                                )}
+                                {status === 'success' && result && (
+                                    <div className="text-start">
+                                        <p className="text-success fw-bold">User created successfully</p>
+                                        <ul className="list-unstyled small text-muted">
+                                            <li><strong>ID:</strong> {result.id}</li>
+                                            <li><strong>Status:</strong> {result.status}</li>
+                                            <li><strong>Email:</strong> {result.profile?.email}</li>
+                                        </ul>
+                                    </div>
+                                )}
+                                {status === 'error' && (
+                                    <p className="text-danger mb-0">{error || 'An error occurred'}</p>
+                                )}
                             </div>
+                            {isFinished && (
+                                <div className="modal-footer">
+                                    <button className="btn btn-secondary" onClick={onClose}>Close</button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -250,18 +266,91 @@
 
         const App = () => {
             const { isAuthenticated, isLoading, user, logout } = useAuth();
-            const [modal, setModal] = useState({ show: false, title: '' });
+            const [modal, setModal] = useState({
+                show: false,
+                title: '',
+                status: 'idle',   // idle | running | success | error
+                progress: 0,
+                error: null,
+                result: null,
+            });
 
-            const handleRun = useCallback((nodeId) => {
-                setModal({ show: true, title: `Running Node ${nodeId}` });
+            const closeModal = useCallback(() => {
+                setModal({ show: false, title: '', status: 'idle', progress: 0, error: null, result: null });
+            }, []);
+
+            const handleRun = useCallback(async (nodeId) => {
+                if (nodeId === '1') {
+                    // ── Create User: real API call ──
+                    setModal({
+                        show: true,
+                        title: 'Create User',
+                        status: 'running',
+                        progress: 10,
+                        error: null,
+                        result: null,
+                    });
+
+                    // Move progress to 40% after a brief moment to show activity
+                    const t1 = setTimeout(() => setModal(prev => ({ ...prev, progress: 40 })), 300);
+
+                    try {
+                        const payload = {
+                            profile: {
+                                firstName: 'Test',
+                                lastName: 'User',
+                                email: `testuser+${Date.now()}@example.com`,
+                                login: `testuser+${Date.now()}@example.com`,
+                            },
+                        };
+
+                        const res = await fetch('/api/v1/users/create', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+
+                        const data = await res.json();
+
+                        if (!res.ok) {
+                            const msg = data.details?.errorSummary || data.error || `HTTP ${res.status}`;
+                            setModal(prev => ({ ...prev, status: 'error', progress: 100, error: msg }));
+                        } else {
+                            setModal(prev => ({
+                                ...prev,
+                                status: 'success',
+                                progress: 100,
+                                result: data.user,
+                            }));
+                        }
+                    } catch (err) {
+                        setModal(prev => ({ ...prev, status: 'error', progress: 100, error: err.message }));
+                    }
+
+                    clearTimeout(t1);
+                } else {
+                    // Other nodes: placeholder modal
+                    setModal({
+                        show: true,
+                        title: `Running Node ${nodeId}`,
+                        status: 'running',
+                        progress: 50,
+                        error: null,
+                        result: null,
+                    });
+                }
             }, []);
 
             const handleViewLogs = useCallback((nodeId) => {
-                setModal({ show: true, title: `Viewing Logs for Node ${nodeId}` });
-            }, []);
-
-            const closeModal = useCallback(() => {
-                setModal({ show: false, title: '' });
+                setModal({
+                    show: true,
+                    title: `Viewing Logs for Node ${nodeId}`,
+                    status: 'running',
+                    progress: 50,
+                    error: null,
+                    result: null,
+                });
             }, []);
 
             const initialNodes = [
@@ -358,7 +447,15 @@
                             <Background variant="dots" gap={12} size={1} />
                         </ReactFlowComponent>
                     </div>
-                    <ActionModal show={modal.show} onClose={closeModal} title={modal.title} />
+                    <ActionModal
+                        show={modal.show}
+                        onClose={closeModal}
+                        title={modal.title}
+                        status={modal.status}
+                        progress={modal.progress}
+                        error={modal.error}
+                        result={modal.result}
+                    />
                 </div>
             );
         };

@@ -7,6 +7,7 @@ import { db } from './db.js';
 import sessionPlugin from './plugins/session.js';
 import oidcPlugin from './plugins/oidc.js';
 import authRoutes from './routes/auth.js';
+import userRoutes from './routes/users.js';
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ await fastify.register(oidcPlugin, {
 
 // API routes
 await fastify.register(authRoutes, { prefix: '/api/v1/auth' });
+await fastify.register(userRoutes, { prefix: '/api/v1/users' });
 
 // SPA fallback
 fastify.setNotFoundHandler((request, reply) => {
