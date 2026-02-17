@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management Process</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/style.css" integrity="sha384-WfpZHO7r6MmU1PGSq0L/LisTEQ/XCapo6UtOSxiNTeJ9CavXCyX5eNZ9jPLnk4+P" crossorigin="anonymous">
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        #root {
+            height: 100vh;
+        }
+        .react-flow__node {
+            padding: 10px;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+            background: white;
+            font-weight: 500;
+        }
+        .react-flow__node.create {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+        .react-flow__node.update {
+            border-color: #007bff;
+            background: #cfe2ff;
+        }
+        .react-flow__node.suspend {
+            border-color: #ffc107;
+            background: #fff3cd;
+        }
+        .react-flow__node.delete {
+            border-color: #dc3545;
+            background: #f8d7da;
+        }
+        .react-flow__node-toolbar {
+            background: white;
+            padding: 4px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .loading-screen {
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+
+    <script src="https://unpkg.com/@babel/standalone@7.29.1/babel.min.js" integrity="sha384-Fo0OdKhdnE7y2WmzjOMW4PYjHkkANeu1501pWTqKrzAPeJMFQb4ZTdAA9dtrVUJV" crossorigin="anonymous"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/umd/index.js" integrity="sha384-wY7mYYMW29ydU3pWp9gFlKSilyabWOUTm6envyQ35JUSDtrXSu36Mkqvey1Echsg" crossorigin="anonymous"></script>
+
+    <script type="text/babel">
+        const { useState, useCallback, useEffect, useContext, createContext } = React;
+        const ReactFlowLib = ReactFlow;
+        const {
+            ReactFlow: ReactFlowComponent,
+            Controls,
+            Background,
+            MarkerType,
+            applyNodeChanges,
+            applyEdgeChanges,
+            NodeToolbar,
+            Handle,
+            Position
+        } = ReactFlowLib;
+
+        // ─── Auth Context ────────────────────────────────────────────────
+
+        const SessionAuthContext = createContext();
+
+        const SessionAuthProvider = ({ children }) => {
+            const [authState, setAuthState] = useState({
+                isAuthenticated: false,
+                isLoading: true,
+                user: null,
+            });
+
+            useEffect(() => {
+                fetch('/api/v1/auth/status', { credentials: 'same-origin' })
+                    .then((res) => res.json())
+                    .then((data) => {
+                        setAuthState({
+                            isAuthenticated: data.isAuthenticated,
+                            isLoading: false,
+                            user: data.user,
+                        });
+                        if (!data.isAuthenticated) {
+                            window.location.href = '/api/v1/auth/login';
+                        }
+                    })
+                    .catch(() => {
+                        setAuthState({ isAuthenticated: false, isLoading: false, user: null });
+                        window.location.href = '/api/v1/auth/login';
+                    });
+            }, []);
+
+            const logout = useCallback(() => {
+                fetch('/api/v1/auth/logout', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                }).then(() => {
+                    setAuthState({ isAuthenticated: false, isLoading: false, user: null });
+                    window.location.href = '/api/v1/auth/login';
+                });
+            }, []);
+
+            return (
+                <SessionAuthContext.Provider value={{ ...authState, logout }}>
+                    {children}
+                </SessionAuthContext.Provider>
+            );
+        };
+
+        const useAuth = () => useContext(SessionAuthContext);
+
+        // ─── Loading Screen ──────────────────────────────────────────────
+
+        const LoadingScreen = () => (
+            <div className="loading-screen">
+                <div className="text-center">
+                    <div className="spinner-border text-primary mb-3" role="status">
+                        <span className="visually-hidden">Loading...</span>
+                    </div>
+                    <div className="text-muted">Verifying authentication...</div>
+                </div>
+            </div>
+        );
+
+        // ─── Modal Component ─────────────────────────────────────────────
+
+        const ActionModal = ({ show, onClose, title }) => {
+            const [progress, setProgress] = useState(0);
+
+            useEffect(() => {
+                if (!show) {
+                    setProgress(0);
+                    return;
+                }
+
+                const interval = setInterval(() => {
+                    setProgress(prev => {
+                        if (prev >= 100) {
+                            clearInterval(interval);
+                            setTimeout(onClose, 200);
+                            return 100;
+                        }
+                        return prev + (100 / 30);
+                    });
+                }, 100);
+
+                return () => clearInterval(interval);
+            }, [show, onClose]);
+
+            if (!show) return null;
+
+            return (
+                <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                    <div className="modal-dialog modal-dialog-centered">
+                        <div className="modal-content">
+                            <div className="modal-header">
+                                <h5 className="modal-title">{title}</h5>
+                            </div>
+                            <div className="modal-body text-center">
+                                <div className="spinner-border text-primary mb-3" role="status">
+                                    <span className="visually-hidden">Loading...</span>
+                                </div>
+                                <div className="progress">
+                                    <div
+                                        className="progress-bar progress-bar-striped progress-bar-animated"
+                                        style={{ width: `${progress}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ─── Custom Node Component ───────────────────────────────────────
+
+        const CustomNode = ({ data, id }) => {
+            return (
+                <>
+                    <Handle type="target" position={Position.Top} />
+                    <NodeToolbar position="top">
+                        <button
+                            className="btn btn-sm btn-success me-2"
+                            onClick={() => data.onRun(id)}
+                        >
+                            ▶ Run
+                        </button>
+                        <button
+                            className="btn btn-sm btn-primary"
+                            onClick={() => data.onViewLogs(id)}
+                        >
+                            📄 View Logs
+                        </button>
+                    </NodeToolbar>
+                    <div>{data.label}</div>
+                    <Handle type="source" position={Position.Bottom} />
+                </>
+            );
+        };
+
+        const nodeTypes = {
+            custom: CustomNode
+        };
+
+        // ─── Initial Edges ───────────────────────────────────────────────
+
+        const initialEdges = [
+            {
+                id: 'e1-2',
+                source: '1',
+                target: '2',
+                markerEnd: { type: MarkerType.ArrowClosed }
+            },
+            {
+                id: 'e2-3',
+                source: '2',
+                target: '3',
+                markerEnd: { type: MarkerType.ArrowClosed }
+            },
+            {
+                id: 'e3-4',
+                source: '3',
+                target: '4',
+                markerEnd: { type: MarkerType.ArrowClosed }
+            }
+        ];
+
+        // ─── Main App Component ──────────────────────────────────────────
+
+        const App = () => {
+            const { isAuthenticated, isLoading, user, logout } = useAuth();
+            const [modal, setModal] = useState({ show: false, title: '' });
+
+            const handleRun = useCallback((nodeId) => {
+                setModal({ show: true, title: `Running Node ${nodeId}` });
+            }, []);
+
+            const handleViewLogs = useCallback((nodeId) => {
+                setModal({ show: true, title: `Viewing Logs for Node ${nodeId}` });
+            }, []);
+
+            const closeModal = useCallback(() => {
+                setModal({ show: false, title: '' });
+            }, []);
+
+            const initialNodes = [
+                {
+                    id: '1',
+                    type: 'custom',
+                    data: {
+                        label: '1. Create User',
+                        onRun: handleRun,
+                        onViewLogs: handleViewLogs
+                    },
+                    position: { x: 250, y: 50 },
+                    className: 'create'
+                },
+                {
+                    id: '2',
+                    type: 'custom',
+                    data: {
+                        label: '2. Update User',
+                        onRun: handleRun,
+                        onViewLogs: handleViewLogs
+                    },
+                    position: { x: 250, y: 150 },
+                    className: 'update'
+                },
+                {
+                    id: '3',
+                    type: 'custom',
+                    data: {
+                        label: '3. Suspend User',
+                        onRun: handleRun,
+                        onViewLogs: handleViewLogs
+                    },
+                    position: { x: 250, y: 250 },
+                    className: 'suspend'
+                },
+                {
+                    id: '4',
+                    type: 'custom',
+                    data: {
+                        label: '4. Delete User',
+                        onRun: handleRun,
+                        onViewLogs: handleViewLogs
+                    },
+                    position: { x: 250, y: 350 },
+                    className: 'delete'
+                }
+            ];
+
+            const [nodes, setNodes] = useState(initialNodes);
+            const [edges, setEdges] = useState(initialEdges);
+
+            const onNodesChange = useCallback(
+                (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
+                []
+            );
+
+            const onEdgesChange = useCallback(
+                (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+                []
+            );
+
+            // Gate: show loading screen while checking auth
+            if (isLoading || !isAuthenticated) {
+                return <LoadingScreen />;
+            }
+
+            return (
+                <div className="container-fluid h-100 p-0">
+                    <nav className="navbar navbar-dark bg-dark">
+                        <div className="container-fluid">
+                            <span className="navbar-brand mb-0 h1">User Management Process Flow</span>
+                            <div className="d-flex align-items-center">
+                                <span className="text-light me-3">{user?.name}</span>
+                                <button
+                                    className="btn btn-outline-light btn-sm"
+                                    onClick={logout}
+                                >
+                                    Logout
+                                </button>
+                            </div>
+                        </div>
+                    </nav>
+                    <div style={{ height: 'calc(100vh - 56px)' }}>
+                        <ReactFlowComponent
+                            nodes={nodes}
+                            edges={edges}
+                            onNodesChange={onNodesChange}
+                            onEdgesChange={onEdgesChange}
+                            nodeTypes={nodeTypes}
+                            fitView
+                        >
+                            <Controls />
+                            <Background variant="dots" gap={12} size={1} />
+                        </ReactFlowComponent>
+                    </div>
+                    <ActionModal show={modal.show} onClose={closeModal} title={modal.title} />
+                </div>
+            );
+        };
+
+        // ─── Render ──────────────────────────────────────────────────────
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(
+            <SessionAuthProvider>
+                <App />
+            </SessionAuthProvider>
+        );
+    </script>
+</body>
+</html>
