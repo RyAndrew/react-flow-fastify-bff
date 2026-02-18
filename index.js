@@ -6,8 +6,10 @@ import fastifyStatic from '@fastify/static';
 import { db } from './db.js';
 import sessionPlugin from './plugins/session.js';
 import oidcPlugin from './plugins/oidc.js';
+import requestLoggerPlugin from './plugins/request-logger.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
+import logRoutes from './routes/logs.js';
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -47,6 +49,9 @@ await fastify.register(sessionPlugin, {
   secure: config.APP_URL.startsWith('https'),
 });
 
+// Request logger (persists every API request as one row in SQLite)
+await fastify.register(requestLoggerPlugin, { db });
+
 // OIDC client (Okta discovery)
 await fastify.register(oidcPlugin, {
   issuer: config.OKTA_ISSUER,
@@ -58,6 +63,7 @@ await fastify.register(oidcPlugin, {
 // API routes
 await fastify.register(authRoutes, { prefix: '/api/v1/auth' });
 await fastify.register(userRoutes, { prefix: '/api/v1/users' });
+await fastify.register(logRoutes, { prefix: '/api/v1/logs' });
 
 // SPA fallback
 fastify.setNotFoundHandler((request, reply) => {

@@ -9,50 +9,18 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/style.css" integrity="sha384-WfpZHO7r6MmU1PGSq0L/LisTEQ/XCapo6UtOSxiNTeJ9CavXCyX5eNZ9jPLnk4+P" crossorigin="anonymous">
 
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        #root {
-            height: 100vh;
-        }
-        .react-flow__node {
-            padding: 10px;
-            border-radius: 8px;
-            border: 2px solid #ddd;
-            background: white;
-            font-weight: 500;
-        }
-        .react-flow__node.create {
-            border-color: #28a745;
-            background: #d4edda;
-        }
-        .react-flow__node.update {
-            border-color: #007bff;
-            background: #cfe2ff;
-        }
-        .react-flow__node.suspend {
-            border-color: #ffc107;
-            background: #fff3cd;
-        }
-        .react-flow__node.delete {
-            border-color: #dc3545;
-            background: #f8d7da;
-        }
-        .react-flow__node-toolbar {
-            background: white;
-            padding: 4px;
-            border-radius: 6px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        }
-        .loading-screen {
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #f8f9fa;
-        }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        #root { height: 100vh; }
+        .react-flow__node { padding: 10px; border-radius: 8px; border: 2px solid #ddd; background: white; font-weight: 500; }
+        .react-flow__node.create { border-color: #28a745; background: #d4edda; }
+        .react-flow__node.update { border-color: #007bff; background: #cfe2ff; }
+        .react-flow__node.suspend { border-color: #ffc107; background: #fff3cd; }
+        .react-flow__node.delete { border-color: #dc3545; background: #f8d7da; }
+        .react-flow__node-toolbar { background: white; padding: 4px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        .loading-screen { height: 100vh; display: flex; justify-content: center; align-items: center; background: #f8f9fa; }
+        .log-table { font-size: 0.75rem; }
+        .log-table td, .log-table th { white-space: nowrap; max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
+        .json-pre { background: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 0.75rem; max-height: 200px; overflow: auto; text-align: left; white-space: pre-wrap; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -60,68 +28,144 @@
 
     <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
-
     <script src="https://unpkg.com/@babel/standalone@7.29.1/babel.min.js" integrity="sha384-Fo0OdKhdnE7y2WmzjOMW4PYjHkkANeu1501pWTqKrzAPeJMFQb4ZTdAA9dtrVUJV" crossorigin="anonymous"></script>
-
     <script src="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/umd/index.js" integrity="sha384-wY7mYYMW29ydU3pWp9gFlKSilyabWOUTm6envyQ35JUSDtrXSu36Mkqvey1Echsg" crossorigin="anonymous"></script>
 
     <script type="text/babel">
-        const { useState, useCallback, useEffect, useContext, createContext } = React;
+        const { useState, useCallback, useEffect, useContext, createContext, useRef } = React;
         const ReactFlowLib = ReactFlow;
         const {
-            ReactFlow: ReactFlowComponent,
-            Controls,
-            Background,
-            MarkerType,
-            applyNodeChanges,
-            applyEdgeChanges,
-            NodeToolbar,
-            Handle,
-            Position
+            ReactFlow: ReactFlowComponent, Controls, Background, MarkerType,
+            applyNodeChanges, applyEdgeChanges, NodeToolbar, Handle, Position
         } = ReactFlowLib;
 
-        // ─── Auth Context ────────────────────────────────────────────────
+        // ─── Helpers ───────────────────────────────────────────────────────
+
+        const api = (url, opts = {}) => fetch(url, { credentials: 'same-origin', ...opts }).then(async r => {
+            const data = await r.json();
+            return { ok: r.ok, status: r.status, data };
+        });
+
+        const apiPost = (url, body) => api(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+
+        const fmtJson = (v) => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); } catch { return String(v); } };
+
+        // ─── Auth Context ──────────────────────────────────────────────────
 
         const SessionAuthContext = createContext();
 
+        const WARNING_BEFORE_MS = 2 * 60 * 1000; // show warning 2 minutes before expiry
+
         const SessionAuthProvider = ({ children }) => {
             const [authState, setAuthState] = useState({
-                isAuthenticated: false,
-                isLoading: true,
-                user: null,
+                isAuthenticated: false, isLoading: true, user: null, expiresAt: null,
             });
+            const [showExpiry, setShowExpiry] = useState(false);
+            const [loggedOut, setLoggedOut] = useState(false);
+            const [countdown, setCountdown] = useState(0);
+            const warningTimer = useRef(null);
+            const logoutTimer = useRef(null);
+            const countdownTimer = useRef(null);
+
+            const clearTimers = () => {
+                clearTimeout(warningTimer.current);
+                clearTimeout(logoutTimer.current);
+                clearInterval(countdownTimer.current);
+            };
+
+            const handleSessionExpired = useCallback(() => {
+                clearTimers();
+                setShowExpiry(false);
+                setAuthState(prev => ({ ...prev, isAuthenticated: false }));
+                fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
+                setLoggedOut(true);
+            }, []);
+
+            const scheduleTimers = useCallback((expiresAt) => {
+                clearTimers();
+                if (!expiresAt) return;
+
+                const now = Date.now();
+                const msUntilExpiry = expiresAt - now;
+                const msUntilWarning = msUntilExpiry - WARNING_BEFORE_MS;
+
+                if (msUntilExpiry <= 0) {
+                    handleSessionExpired();
+                    return;
+                }
+
+                if (msUntilWarning <= 0) {
+                    setShowExpiry(true);
+                    setCountdown(Math.ceil(msUntilExpiry / 1000));
+                    countdownTimer.current = setInterval(() => {
+                        setCountdown(prev => {
+                            if (prev <= 1) { clearInterval(countdownTimer.current); return 0; }
+                            return prev - 1;
+                        });
+                    }, 1000);
+                } else {
+                    warningTimer.current = setTimeout(() => {
+                        setShowExpiry(true);
+                        setCountdown(Math.ceil(WARNING_BEFORE_MS / 1000));
+                        countdownTimer.current = setInterval(() => {
+                            setCountdown(prev => {
+                                if (prev <= 1) { clearInterval(countdownTimer.current); return 0; }
+                                return prev - 1;
+                            });
+                        }, 1000);
+                    }, msUntilWarning);
+                }
+
+                logoutTimer.current = setTimeout(handleSessionExpired, msUntilExpiry);
+            }, [handleSessionExpired]);
 
             useEffect(() => {
                 fetch('/api/v1/auth/status', { credentials: 'same-origin' })
-                    .then((res) => res.json())
-                    .then((data) => {
-                        setAuthState({
-                            isAuthenticated: data.isAuthenticated,
-                            isLoading: false,
-                            user: data.user,
-                        });
-                        if (!data.isAuthenticated) {
+                    .then(async r => {
+                        if (r.ok) {
+                            const data = await r.json();
+                            setAuthState({ isAuthenticated: true, isLoading: false, user: data.user, expiresAt: data.expiresAt });
+                            scheduleTimers(data.expiresAt);
+                        } else if (r.status === 419) {
+                            setAuthState(prev => ({ ...prev, isLoading: false }));
+                            setLoggedOut(true);
+                        } else {
                             window.location.href = '/api/v1/auth/login';
                         }
                     })
-                    .catch(() => {
-                        setAuthState({ isAuthenticated: false, isLoading: false, user: null });
-                        window.location.href = '/api/v1/auth/login';
-                    });
-            }, []);
+                    .catch(() => { window.location.href = '/api/v1/auth/login'; });
+
+                return clearTimers;
+            }, [scheduleTimers]);
+
+            const refresh = useCallback(async () => {
+                const res = await fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+                const data = await res.json();
+                if (res.ok && data.expiresAt) {
+                    setAuthState(prev => ({ ...prev, expiresAt: data.expiresAt }));
+                    setShowExpiry(false);
+                    scheduleTimers(data.expiresAt);
+                } else {
+                    handleSessionExpired();
+                }
+            }, [scheduleTimers, handleSessionExpired]);
 
             const logout = useCallback(() => {
-                fetch('/api/v1/auth/logout', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                }).then(() => {
-                    setAuthState({ isAuthenticated: false, isLoading: false, user: null });
-                    window.location.href = '/api/v1/auth/login';
-                });
+                clearTimers();
+                fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' })
+                    .then(() => { window.location.href = '/api/v1/auth/login'; });
+            }, []);
+
+            const loginRedirect = useCallback(() => {
+                window.location.href = '/api/v1/auth/login';
             }, []);
 
             return (
-                <SessionAuthContext.Provider value={{ ...authState, logout }}>
+                <SessionAuthContext.Provider value={{ ...authState, logout, refresh, loginRedirect, showExpiry, loggedOut, countdown }}>
                     {children}
                 </SessionAuthContext.Provider>
             );
@@ -129,294 +173,592 @@
 
         const useAuth = () => useContext(SessionAuthContext);
 
-        // ─── Loading Screen ──────────────────────────────────────────────
+        // ─── Loading Screen ────────────────────────────────────────────────
 
         const LoadingScreen = () => (
             <div className="loading-screen">
                 <div className="text-center">
-                    <div className="spinner-border text-primary mb-3" role="status">
-                        <span className="visually-hidden">Loading...</span>
-                    </div>
+                    <div className="spinner-border text-primary mb-3" role="status" />
                     <div className="text-muted">Verifying authentication...</div>
                 </div>
             </div>
         );
 
-        // ─── Modal Component ─────────────────────────────────────────────
+        // ─── Generic Modal Shell ───────────────────────────────────────────
 
-        // status: 'idle' | 'running' | 'success' | 'error'
-        const ActionModal = ({ show, onClose, title, status, progress, error, result }) => {
+        const Modal = ({ show, onClose, title, size, children }) => {
             if (!show) return null;
-
-            const isFinished = status === 'success' || status === 'error';
-
-            const barClass = status === 'error'
-                ? 'progress-bar bg-danger'
-                : status === 'success'
-                    ? 'progress-bar bg-success'
-                    : 'progress-bar progress-bar-striped progress-bar-animated';
-
             return (
                 <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-                    <div className="modal-dialog modal-dialog-centered">
+                    <div className={`modal-dialog modal-dialog-centered modal-dialog-scrollable ${size || ''}`}>
                         <div className="modal-content">
                             <div className="modal-header">
                                 <h5 className="modal-title">{title}</h5>
-                                {isFinished && (
-                                    <button type="button" className="btn-close" onClick={onClose}></button>
-                                )}
+                                <button type="button" className="btn-close" onClick={onClose}></button>
                             </div>
-                            <div className="modal-body text-center">
-                                {status === 'running' && (
-                                    <div className="spinner-border text-primary mb-3" role="status">
-                                        <span className="visually-hidden">Loading...</span>
-                                    </div>
-                                )}
-                                {status === 'success' && (
-                                    <div className="text-success mb-3" style={{ fontSize: '2rem' }}>&#10003;</div>
-                                )}
-                                {status === 'error' && (
-                                    <div className="text-danger mb-3" style={{ fontSize: '2rem' }}>&#10007;</div>
-                                )}
-                                <div className="progress mb-3">
-                                    <div className={barClass} style={{ width: `${progress}%`, transition: 'width 0.3s ease' }}></div>
-                                </div>
-                                {status === 'running' && (
-                                    <p className="text-muted mb-0">Calling Okta API...</p>
-                                )}
-                                {status === 'success' && result && (
-                                    <div className="text-start">
-                                        <p className="text-success fw-bold">User created successfully</p>
-                                        <ul className="list-unstyled small text-muted">
-                                            <li><strong>ID:</strong> {result.id}</li>
-                                            <li><strong>Status:</strong> {result.status}</li>
-                                            <li><strong>Email:</strong> {result.profile?.email}</li>
-                                        </ul>
-                                    </div>
-                                )}
-                                {status === 'error' && (
-                                    <p className="text-danger mb-0">{error || 'An error occurred'}</p>
-                                )}
-                            </div>
-                            {isFinished && (
-                                <div className="modal-footer">
-                                    <button className="btn btn-secondary" onClick={onClose}>Close</button>
-                                </div>
-                            )}
+                            {children}
                         </div>
                     </div>
                 </div>
             );
         };
 
-        // ─── Custom Node Component ───────────────────────────────────────
+        // ─── Status Badge ──────────────────────────────────────────────────
 
-        const CustomNode = ({ data, id }) => {
+        const StatusBadge = ({ status }) => {
+            const colors = {
+                ACTIVE: 'success', STAGED: 'info', PROVISIONED: 'info',
+                RECOVERY: 'warning', PASSWORD_EXPIRED: 'warning', LOCKED_OUT: 'warning',
+                SUSPENDED: 'warning', DEPROVISIONED: 'secondary',
+            };
+            return <span className={`badge bg-${colors[status] || 'dark'}`}>{status}</span>;
+        };
+
+        // ─── User Picker ───────────────────────────────────────────────────
+
+        const UserPicker = ({ users, selectedId, onChange, loading }) => {
+            if (loading) return <div className="text-center"><div className="spinner-border spinner-border-sm" /></div>;
+            if (!users.length) return <div className="alert alert-warning mb-0">No users found. Create a user first.</div>;
+            return (
+                <select className="form-select mb-3" value={selectedId || ''} onChange={e => onChange(e.target.value)}>
+                    <option value="">Select a user...</option>
+                    {users.map(u => (
+                        <option key={u.okta_id} value={u.okta_id}>
+                            {u.first_name} {u.last_name} ({u.email}) — {u.status}
+                        </option>
+                    ))}
+                </select>
+            );
+        };
+
+        // ─── Create User Modal Content ─────────────────────────────────────
+
+        const CreateUserContent = ({ onClose }) => {
+            const ts = Date.now();
+            const [payload, setPayload] = useState(JSON.stringify({
+                profile: {
+                    firstName: 'Test',
+                    lastName: 'User',
+                    email: `testuser+${ts}@example.com`,
+                    login: `testuser+${ts}@example.com`,
+                },
+            }, null, 2));
+            const [status, setStatus] = useState('idle');
+            const [progress, setProgress] = useState(0);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            const handleCreate = async () => {
+                let parsed;
+                try { parsed = JSON.parse(payload); } catch { setError('Invalid JSON'); return; }
+                setStatus('running');
+                setProgress(10);
+                const t = setTimeout(() => setProgress(40), 300);
+
+                const { ok, data } = await apiPost('/api/v1/users/create', parsed);
+                clearTimeout(t);
+
+                if (ok) { setStatus('done'); setProgress(100); setResult(data.user); }
+                else { setStatus('error'); setProgress(100); setError(data.details?.errorSummary || data.error || 'Unknown error'); }
+            };
+
+            const barClass = status === 'error' ? 'progress-bar bg-danger'
+                : status === 'done' ? 'progress-bar bg-success'
+                : 'progress-bar progress-bar-striped progress-bar-animated';
+
             return (
                 <>
-                    <Handle type="target" position={Position.Top} />
-                    <NodeToolbar position="top">
-                        <button
-                            className="btn btn-sm btn-success me-2"
-                            onClick={() => data.onRun(id)}
-                        >
-                            ▶ Run
-                        </button>
-                        <button
-                            className="btn btn-sm btn-primary"
-                            onClick={() => data.onViewLogs(id)}
-                        >
-                            📄 View Logs
-                        </button>
-                    </NodeToolbar>
-                    <div>{data.label}</div>
-                    <Handle type="source" position={Position.Bottom} />
+                    <div className="modal-body">
+                        <div className="mb-2 font-monospace small">
+                            <span className="badge bg-dark me-2">POST</span>
+                            <code>/api/v1/users/create</code>
+                        </div>
+                        {status === 'idle' && (
+                            <div>
+                                <label className="form-label small fw-bold">Payload (edit before sending):</label>
+                                <textarea className="form-control font-monospace" rows={10} style={{ fontSize: '0.8rem' }}
+                                    value={payload} onChange={e => setPayload(e.target.value)} />
+                                {error && <p className="text-danger mt-2 mb-0">{error}</p>}
+                            </div>
+                        )}
+                        {status === 'running' && (
+                            <div className="text-center">
+                                <div className="spinner-border text-primary mb-3" role="status" />
+                                <div className="progress mb-2">
+                                    <div className={barClass} style={{ width: `${progress}%`, transition: 'width 0.3s' }}></div>
+                                </div>
+                                <p className="text-muted mb-0">Calling downstream API...</p>
+                            </div>
+                        )}
+                        {status === 'done' && result && (
+                            <div>
+                                <div className="text-success fw-bold mb-2">&#10003; User created successfully</div>
+                                <pre className="json-pre">{fmtJson(result)}</pre>
+                            </div>
+                        )}
+                        {status === 'error' && status !== 'idle' && (
+                            <div>
+                                <div className="text-danger fw-bold mb-2">&#10007; Failed</div>
+                                <div className="progress mb-2"><div className="progress-bar bg-danger" style={{ width: '100%' }}></div></div>
+                                <p className="text-danger">{error}</p>
+                            </div>
+                        )}
+                    </div>
+                    <div className="modal-footer">
+                        {status === 'idle' && <button className="btn btn-success" onClick={handleCreate}>Create User</button>}
+                        <button className="btn btn-secondary" onClick={onClose}>Close</button>
+                    </div>
                 </>
             );
         };
 
-        const nodeTypes = {
-            custom: CustomNode
+        // ─── Generic Payload Task (reusable for update tasks) ──────────────
+
+        const PayloadTask = ({ url, method, buttonLabel, buttonColor, defaultPayload, onSuccess }) => {
+            const [payload, setPayload] = useState(defaultPayload);
+            const [status, setStatus] = useState('idle');
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            useEffect(() => { setPayload(defaultPayload); setStatus('idle'); setResult(null); setError(null); }, [defaultPayload]);
+
+            const handleSubmit = async () => {
+                let parsed;
+                try { parsed = JSON.parse(payload); } catch { setError('Invalid JSON'); return; }
+                setStatus('running'); setError(null);
+                const fetchFn = method === 'POST' ? apiPost : (u, b) => api(u, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+                const { ok, data } = await fetchFn(url, parsed);
+                if (ok) { setStatus('done'); setResult(data); if (onSuccess) onSuccess(data); }
+                else { setStatus('error'); setError(data.details?.errorSummary || data.error || 'Failed'); }
+            };
+
+            const reset = () => { setStatus('idle'); setResult(null); setError(null); setPayload(defaultPayload); };
+
+            return (
+                <div>
+                    <div className="mb-2 font-monospace small">
+                        <span className="badge bg-dark me-2">{method}</span>
+                        <code>{url}</code>
+                    </div>
+                    {status === 'idle' && (
+                        <div>
+                            <textarea className="form-control font-monospace mb-2" rows={6} style={{ fontSize: '0.8rem' }}
+                                value={payload} onChange={e => setPayload(e.target.value)} />
+                            <button className={`btn btn-${buttonColor} btn-sm`} onClick={handleSubmit}>{buttonLabel}</button>
+                        </div>
+                    )}
+                    {status === 'running' && <div className="text-center py-2"><div className="spinner-border spinner-border-sm text-primary" /></div>}
+                    {status === 'done' && (
+                        <div>
+                            <div className="text-success fw-bold small mb-1">&#10003; Success</div>
+                            <pre className="json-pre">{fmtJson(result)}</pre>
+                            <button className="btn btn-outline-secondary btn-sm mt-1" onClick={reset}>Run Again</button>
+                        </div>
+                    )}
+                    {status === 'error' && (
+                        <div>
+                            <p className="text-danger small mb-1">&#10007; {error}</p>
+                            <button className="btn btn-outline-secondary btn-sm" onClick={reset}>Try Again</button>
+                        </div>
+                    )}
+                </div>
+            );
         };
 
-        // ─── Initial Edges ───────────────────────────────────────────────
+        // ─── Update User Modal Content (multi-task) ────────────────────────
 
-        const initialEdges = [
-            {
-                id: 'e1-2',
-                source: '1',
-                target: '2',
-                markerEnd: { type: MarkerType.ArrowClosed }
-            },
-            {
-                id: 'e2-3',
-                source: '2',
-                target: '3',
-                markerEnd: { type: MarkerType.ArrowClosed }
-            },
-            {
-                id: 'e3-4',
-                source: '3',
-                target: '4',
-                markerEnd: { type: MarkerType.ArrowClosed }
-            }
+        const UPDATE_TASKS = [
+            { key: 'profile', label: 'Update Profile' },
+            { key: 'password', label: 'Update Password' },
+            { key: 'factor', label: 'Enroll Authenticator' },
         ];
 
-        // ─── Main App Component ──────────────────────────────────────────
+        const UpdateUserContent = ({ onClose }) => {
+            const [users, setUsers] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedId, setSelectedId] = useState('');
+            const [activeTask, setActiveTask] = useState('profile');
 
-        const App = () => {
-            const { isAuthenticated, isLoading, user, logout } = useAuth();
-            const [modal, setModal] = useState({
-                show: false,
-                title: '',
-                status: 'idle',   // idle | running | success | error
-                progress: 0,
-                error: null,
-                result: null,
-            });
-
-            const closeModal = useCallback(() => {
-                setModal({ show: false, title: '', status: 'idle', progress: 0, error: null, result: null });
+            useEffect(() => {
+                api('/api/v1/users').then(({ data }) => { setUsers(data.users || []); setLoading(false); });
             }, []);
 
-            const handleRun = useCallback(async (nodeId) => {
-                if (nodeId === '1') {
-                    // ── Create User: real API call ──
-                    setModal({
-                        show: true,
-                        title: 'Create User',
-                        status: 'running',
-                        progress: 10,
-                        error: null,
-                        result: null,
-                    });
+            const selectedUser = users.find(u => u.okta_id === selectedId);
 
-                    // Move progress to 40% after a brief moment to show activity
-                    const t1 = setTimeout(() => setModal(prev => ({ ...prev, progress: 40 })), 300);
-
-                    try {
-                        const payload = {
-                            profile: {
-                                firstName: 'Test',
-                                lastName: 'User',
-                                email: `testuser+${Date.now()}@example.com`,
-                                login: `testuser+${Date.now()}@example.com`,
-                            },
-                        };
-
-                        const res = await fetch('/api/v1/users/create', {
-                            method: 'POST',
-                            credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload),
-                        });
-
-                        const data = await res.json();
-
-                        if (!res.ok) {
-                            const msg = data.details?.errorSummary || data.error || `HTTP ${res.status}`;
-                            setModal(prev => ({ ...prev, status: 'error', progress: 100, error: msg }));
-                        } else {
-                            setModal(prev => ({
-                                ...prev,
-                                status: 'success',
-                                progress: 100,
-                                result: data.user,
-                            }));
-                        }
-                    } catch (err) {
-                        setModal(prev => ({ ...prev, status: 'error', progress: 100, error: err.message }));
-                    }
-
-                    clearTimeout(t1);
-                } else {
-                    // Other nodes: placeholder modal
-                    setModal({
-                        show: true,
-                        title: `Running Node ${nodeId}`,
-                        status: 'running',
-                        progress: 50,
-                        error: null,
-                        result: null,
-                    });
+            const profilePayload = selectedUser ? JSON.stringify({
+                profile: {
+                    firstName: selectedUser.first_name,
+                    lastName: selectedUser.last_name,
+                    email: selectedUser.email,
+                    mobilePhone: '555-555-0100',
                 }
+            }, null, 2) : '';
+
+            const passwordPayload = JSON.stringify({
+                credentials: {
+                    password: { value: 'NewP@ssw0rd!' },
+                },
+            }, null, 2);
+
+            const factorPayload = JSON.stringify({
+                factorType: 'sms',
+                provider: 'OKTA',
+                profile: { phoneNumber: '+1-555-555-0100' },
+            }, null, 2);
+
+            return (
+                <>
+                    <div className="modal-body">
+                        <UserPicker users={users} selectedId={selectedId} onChange={v => { setSelectedId(v); setActiveTask('profile'); }} loading={loading} />
+                        {selectedId && (
+                            <div>
+                                <ul className="nav nav-tabs mb-3">
+                                    {UPDATE_TASKS.map(t => (
+                                        <li className="nav-item" key={t.key}>
+                                            <button className={`nav-link ${activeTask === t.key ? 'active' : ''}`}
+                                                onClick={() => setActiveTask(t.key)}>{t.label}</button>
+                                        </li>
+                                    ))}
+                                </ul>
+                                {activeTask === 'profile' && (
+                                    <PayloadTask
+                                        url={`/api/v1/users/${selectedId}/update`}
+                                        method="POST" buttonLabel="Update Profile" buttonColor="primary"
+                                        defaultPayload={profilePayload}
+                                    />
+                                )}
+                                {activeTask === 'password' && (
+                                    <PayloadTask
+                                        url={`/api/v1/users/${selectedId}/update`}
+                                        method="POST" buttonLabel="Set Password" buttonColor="warning"
+                                        defaultPayload={passwordPayload}
+                                    />
+                                )}
+                                {activeTask === 'factor' && (
+                                    <PayloadTask
+                                        url={`/api/v1/users/${selectedId}/factors`}
+                                        method="POST" buttonLabel="Enroll Factor" buttonColor="info"
+                                        defaultPayload={factorPayload}
+                                    />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    <div className="modal-footer">
+                        <button className="btn btn-secondary" onClick={onClose}>Close</button>
+                    </div>
+                </>
+            );
+        };
+
+        // ─── Lifecycle Modal Content (Suspend node) ────────────────────────
+
+        const LIFECYCLE_ACTIONS = [
+            { action: 'suspend', label: 'Suspend', color: 'warning' },
+            { action: 'unsuspend', label: 'Unsuspend', color: 'info' },
+            { action: 'activate', label: 'Activate', color: 'success' },
+            { action: 'reactivate', label: 'Reactivate', color: 'success' },
+            { action: 'unlock', label: 'Unlock', color: 'info' },
+            { action: 'reset_password', label: 'Reset Password', color: 'warning' },
+            { action: 'expire_password', label: 'Expire Password', color: 'warning' },
+            { action: 'reset_factors', label: 'Reset Factors', color: 'secondary' },
+        ];
+
+        const LifecycleContent = ({ onClose }) => {
+            const [users, setUsers] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedId, setSelectedId] = useState('');
+            const [running, setRunning] = useState(null);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            const loadUsers = () => {
+                api('/api/v1/users').then(({ data }) => { setUsers(data.users || []); setLoading(false); });
+            };
+            useEffect(loadUsers, []);
+
+            const handleAction = async (action) => {
+                if (!selectedId) return;
+                setRunning(action);
+                setResult(null);
+                setError(null);
+
+                const { ok, data } = await apiPost(`/api/v1/users/${selectedId}/lifecycle/${action}`, {});
+                setRunning(null);
+                if (ok) {
+                    setResult({ action, user: data.user });
+                    loadUsers();
+                } else {
+                    setError(data.details?.errorSummary || data.error || `${action} failed`);
+                }
+            };
+
+            return (
+                <>
+                    <div className="modal-body">
+                        <UserPicker users={users} selectedId={selectedId} onChange={v => { setSelectedId(v); setResult(null); setError(null); }} loading={loading} />
+                        {selectedId && (
+                            <div className="d-flex flex-wrap gap-2 mb-3">
+                                {LIFECYCLE_ACTIONS.map(({ action, label, color }) => (
+                                    <button key={action} className={`btn btn-${color} btn-sm`}
+                                        disabled={!!running} onClick={() => handleAction(action)}>
+                                        {running === action ? <span className="spinner-border spinner-border-sm" /> : label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        {result && (
+                            <div>
+                                <div className="text-success fw-bold mb-2">&#10003; {result.action} completed</div>
+                                <pre className="json-pre">{fmtJson(result.user)}</pre>
+                            </div>
+                        )}
+                        {error && <p className="text-danger">&#10007; {error}</p>}
+                    </div>
+                    <div className="modal-footer">
+                        <button className="btn btn-secondary" onClick={onClose}>Close</button>
+                    </div>
+                </>
+            );
+        };
+
+        // ─── Delete Modal Content (Deactivate + Delete) ────────────────────
+
+        const DeleteContent = ({ onClose }) => {
+            const [users, setUsers] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedId, setSelectedId] = useState('');
+            const [running, setRunning] = useState(null);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            const loadUsers = () => {
+                api('/api/v1/users').then(({ data }) => { setUsers(data.users || []); setLoading(false); });
+            };
+            useEffect(loadUsers, []);
+
+            const handleDeactivate = async () => {
+                if (!selectedId) return;
+                setRunning('deactivate'); setResult(null); setError(null);
+                const { ok, data } = await apiPost(`/api/v1/users/${selectedId}/deactivate`, {});
+                setRunning(null);
+                if (ok) { setResult({ action: 'deactivate', data }); loadUsers(); }
+                else { setError(data.details?.errorSummary || data.error || 'Deactivate failed'); }
+            };
+
+            const handleDelete = async () => {
+                if (!selectedId) return;
+                setRunning('delete'); setResult(null); setError(null);
+                const { ok, data } = await api(`/api/v1/users/${selectedId}`, { method: 'DELETE' });
+                setRunning(null);
+                if (ok) { setResult({ action: 'delete', data }); setSelectedId(''); loadUsers(); }
+                else { setError(data.details?.errorSummary || data.error || 'Delete failed — user may need to be deactivated first'); }
+            };
+
+            const selectedUser = users.find(u => u.okta_id === selectedId);
+
+            return (
+                <>
+                    <div className="modal-body">
+                        <UserPicker users={users} selectedId={selectedId} onChange={v => { setSelectedId(v); setResult(null); setError(null); }} loading={loading} />
+                        {selectedId && (
+                            <div className="d-flex gap-2 mb-3">
+                                <button className="btn btn-warning" disabled={!!running} onClick={handleDeactivate}>
+                                    {running === 'deactivate' ? <span className="spinner-border spinner-border-sm" /> : 'Deactivate'}
+                                </button>
+                                <button className="btn btn-danger" disabled={!!running} onClick={handleDelete}>
+                                    {running === 'delete' ? <span className="spinner-border spinner-border-sm" /> : 'Delete'}
+                                </button>
+                            </div>
+                        )}
+                        {selectedId && selectedUser && (
+                            <p className="small text-muted">Current status: <StatusBadge status={selectedUser.status} /></p>
+                        )}
+                        {result && <div className="text-success fw-bold">&#10003; {result.action} completed</div>}
+                        {error && <p className="text-danger">&#10007; {error}</p>}
+                    </div>
+                    <div className="modal-footer">
+                        <button className="btn btn-secondary" onClick={onClose}>Close</button>
+                    </div>
+                </>
+            );
+        };
+
+        // ─── Shared Log Viewer ─────────────────────────────────────────────
+
+        const LogViewer = ({ urlFilter }) => {
+            const [logs, setLogs] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [expanded, setExpanded] = useState(null);
+
+            useEffect(() => {
+                const params = new URLSearchParams({ limit: '50' });
+                if (urlFilter) params.set('url_contains', urlFilter);
+                api(`/api/v1/logs?${params}`).then(({ data }) => { setLogs(data.logs || []); setLoading(false); });
+            }, [urlFilter]);
+
+            if (loading) return <div className="text-center py-3"><div className="spinner-border text-primary" /></div>;
+            if (!logs.length) return <p className="text-muted">No logs found.</p>;
+
+            return (
+                <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
+                    <table className="table table-sm table-striped log-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Method</th>
+                                <th>URL</th>
+                                <th>Status</th>
+                                <th>ms</th>
+                                <th>DS Status</th>
+                                <th>DS ms</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {logs.map(log => (
+                                <React.Fragment key={log.id}>
+                                    <tr onClick={() => setExpanded(expanded === log.id ? null : log.id)} style={{ cursor: 'pointer' }}>
+                                        <td>{new Date(log.created_at).toLocaleTimeString()}</td>
+                                        <td><span className="badge bg-dark">{log.method}</span></td>
+                                        <td title={log.url}>{log.url}</td>
+                                        <td><span className={`badge bg-${log.status_code < 400 ? 'success' : 'danger'}`}>{log.status_code}</span></td>
+                                        <td>{log.duration_ms}</td>
+                                        <td>{log.downstream_status_code ? <span className={`badge bg-${log.downstream_status_code < 400 ? 'info' : 'danger'}`}>{log.downstream_status_code}</span> : '—'}</td>
+                                        <td>{log.downstream_duration_ms || '—'}</td>
+                                        <td>{expanded === log.id ? '▲' : '▼'}</td>
+                                    </tr>
+                                    {expanded === log.id && (
+                                        <tr>
+                                            <td colSpan={8}>
+                                                <div className="p-2">
+                                                    {log.request_body && <div className="mb-2"><strong className="small">Request Body:</strong><pre className="json-pre">{fmtJson(log.request_body)}</pre></div>}
+                                                    {log.error && <div className="mb-2"><strong className="small text-danger">Error:</strong><pre className="json-pre text-danger">{log.error}</pre></div>}
+                                                    {log.downstream_url && <div className="mb-2"><strong className="small">Downstream URL:</strong> <code>{log.downstream_url}</code></div>}
+                                                    {log.downstream_request_body && <div className="mb-2"><strong className="small">Downstream Request:</strong><pre className="json-pre">{fmtJson(log.downstream_request_body)}</pre></div>}
+                                                    {log.downstream_response_body && <div className="mb-2"><strong className="small">Downstream Response:</strong><pre className="json-pre">{fmtJson(log.downstream_response_body)}</pre></div>}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
+
+        // Per-node log content wrappers
+        const LogsContentCreate = ({ onClose }) => (
+            <><div className="modal-body"><LogViewer urlFilter="users/create" /></div>
+            <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div></>
+        );
+        const LogsContentUpdate = ({ onClose }) => (
+            <><div className="modal-body"><LogViewer urlFilter="/update,/credentials,/factors" /></div>
+            <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div></>
+        );
+        const LogsContentLifecycle = ({ onClose }) => (
+            <><div className="modal-body"><LogViewer urlFilter="/lifecycle/" /></div>
+            <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div></>
+        );
+        const LogsContentDelete = ({ onClose }) => (
+            <><div className="modal-body"><LogViewer urlFilter="/deactivate" /></div>
+            <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div></>
+        );
+
+        // ─── Custom Node Component ─────────────────────────────────────────
+
+        const CustomNode = ({ data, id }) => (
+            <>
+                <Handle type="target" position={Position.Top} />
+                <NodeToolbar position="top">
+                    <button className="btn btn-sm btn-success me-2" onClick={() => data.onRun(id)}>▶ Run</button>
+                    <button className="btn btn-sm btn-primary" onClick={() => data.onViewLogs(id)}>📄 View Logs</button>
+                </NodeToolbar>
+                <div>{data.label}</div>
+                <Handle type="source" position={Position.Bottom} />
+            </>
+        );
+
+        const nodeTypes = { custom: CustomNode };
+
+        // ─── Initial Edges ─────────────────────────────────────────────────
+
+        const initialEdges = [
+            { id: 'e1-2', source: '1', target: '2', markerEnd: { type: MarkerType.ArrowClosed } },
+            { id: 'e2-3', source: '2', target: '3', markerEnd: { type: MarkerType.ArrowClosed } },
+            { id: 'e3-4', source: '3', target: '4', markerEnd: { type: MarkerType.ArrowClosed } },
+        ];
+
+        // ─── Modal type → title + content mapping ──────────────────────────
+
+        const MODAL_CONFIG = {
+            create:         { title: 'Create User',               size: 'modal-lg', Content: CreateUserContent },
+            update:         { title: 'Update User',               size: 'modal-lg', Content: UpdateUserContent },
+            lifecycle:      { title: 'User Lifecycle',            size: 'modal-lg', Content: LifecycleContent },
+            delete:         { title: 'Deactivate / Delete User',  size: '',         Content: DeleteContent },
+            logs_create:    { title: 'Logs: Create User',         size: 'modal-xl', Content: LogsContentCreate },
+            logs_update:    { title: 'Logs: Update User',         size: 'modal-xl', Content: LogsContentUpdate },
+            logs_lifecycle: { title: 'Logs: Lifecycle',           size: 'modal-xl', Content: LogsContentLifecycle },
+            logs_delete:    { title: 'Logs: Deactivate / Delete', size: 'modal-xl', Content: LogsContentDelete },
+        };
+
+        const NODE_TO_MODAL = { '1': 'create', '2': 'update', '3': 'lifecycle', '4': 'delete' };
+        const NODE_TO_LOGS = { '1': 'logs_create', '2': 'logs_update', '3': 'logs_lifecycle', '4': 'logs_delete' };
+
+        // ─── Main App ──────────────────────────────────────────────────────
+
+        const App = () => {
+            const { isAuthenticated, isLoading, user, logout, refresh, loginRedirect, showExpiry, loggedOut, countdown } = useAuth();
+            const [modalType, setModalType] = useState(null);
+
+            const closeModal = useCallback(() => setModalType(null), []);
+
+            const handleRun = useCallback((nodeId) => {
+                setModalType(NODE_TO_MODAL[nodeId] || null);
             }, []);
 
             const handleViewLogs = useCallback((nodeId) => {
-                setModal({
-                    show: true,
-                    title: `Viewing Logs for Node ${nodeId}`,
-                    status: 'running',
-                    progress: 50,
-                    error: null,
-                    result: null,
-                });
+                setModalType(NODE_TO_LOGS[nodeId] || 'logs_create');
             }, []);
 
             const initialNodes = [
-                {
-                    id: '1',
-                    type: 'custom',
-                    data: {
-                        label: '1. Create User',
-                        onRun: handleRun,
-                        onViewLogs: handleViewLogs
-                    },
-                    position: { x: 250, y: 50 },
-                    className: 'create'
-                },
-                {
-                    id: '2',
-                    type: 'custom',
-                    data: {
-                        label: '2. Update User',
-                        onRun: handleRun,
-                        onViewLogs: handleViewLogs
-                    },
-                    position: { x: 250, y: 150 },
-                    className: 'update'
-                },
-                {
-                    id: '3',
-                    type: 'custom',
-                    data: {
-                        label: '3. Suspend User',
-                        onRun: handleRun,
-                        onViewLogs: handleViewLogs
-                    },
-                    position: { x: 250, y: 250 },
-                    className: 'suspend'
-                },
-                {
-                    id: '4',
-                    type: 'custom',
-                    data: {
-                        label: '4. Delete User',
-                        onRun: handleRun,
-                        onViewLogs: handleViewLogs
-                    },
-                    position: { x: 250, y: 350 },
-                    className: 'delete'
-                }
+                { id: '1', type: 'custom', data: { label: '1. Create User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 50 }, className: 'create' },
+                { id: '2', type: 'custom', data: { label: '2. Update User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 150 }, className: 'update' },
+                { id: '3', type: 'custom', data: { label: '3. Suspend User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 250 }, className: 'suspend' },
+                { id: '4', type: 'custom', data: { label: '4. Delete User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 350 }, className: 'delete' },
             ];
 
             const [nodes, setNodes] = useState(initialNodes);
             const [edges, setEdges] = useState(initialEdges);
+            const onNodesChange = useCallback((c) => setNodes(n => applyNodeChanges(c, n)), []);
+            const onEdgesChange = useCallback((c) => setEdges(e => applyEdgeChanges(c, e)), []);
 
-            const onNodesChange = useCallback(
-                (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
-                []
+            if (isLoading) return <LoadingScreen />;
+
+            if (loggedOut || !isAuthenticated) return (
+                <div className="loading-screen">
+                    <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}>
+                        <div className="modal-dialog modal-dialog-centered">
+                            <div className="modal-content border-danger">
+                                <div className="modal-header bg-danger text-white">
+                                    <h5 className="modal-title">Session Expired</h5>
+                                </div>
+                                <div className="modal-body text-center">
+                                    <p className="mb-1">Your session has expired due to inactivity.</p>
+                                    <p className="text-muted small mb-0">Please log in again to continue.</p>
+                                </div>
+                                <div className="modal-footer justify-content-center">
+                                    <button className="btn btn-primary btn-lg" onClick={loginRedirect}>Log In</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             );
 
-            const onEdgesChange = useCallback(
-                (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-                []
-            );
-
-            // Gate: show loading screen while checking auth
-            if (isLoading || !isAuthenticated) {
-                return <LoadingScreen />;
-            }
+            const cfg = modalType ? MODAL_CONFIG[modalType] : null;
 
             return (
                 <div className="container-fluid h-100 p-0">
@@ -425,42 +767,46 @@
                             <span className="navbar-brand mb-0 h1">User Management Process Flow</span>
                             <div className="d-flex align-items-center">
                                 <span className="text-light me-3">{user?.name}</span>
-                                <button
-                                    className="btn btn-outline-light btn-sm"
-                                    onClick={logout}
-                                >
-                                    Logout
-                                </button>
+                                <button className="btn btn-outline-light btn-sm" onClick={logout}>Logout</button>
                             </div>
                         </div>
                     </nav>
                     <div style={{ height: 'calc(100vh - 56px)' }}>
-                        <ReactFlowComponent
-                            nodes={nodes}
-                            edges={edges}
-                            onNodesChange={onNodesChange}
-                            onEdgesChange={onEdgesChange}
-                            nodeTypes={nodeTypes}
-                            fitView
-                        >
+                        <ReactFlowComponent nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView>
                             <Controls />
                             <Background variant="dots" gap={12} size={1} />
                         </ReactFlowComponent>
                     </div>
-                    <ActionModal
-                        show={modal.show}
-                        onClose={closeModal}
-                        title={modal.title}
-                        status={modal.status}
-                        progress={modal.progress}
-                        error={modal.error}
-                        result={modal.result}
-                    />
+                    {cfg && (
+                        <Modal show={true} onClose={closeModal} title={cfg.title} size={cfg.size}>
+                            <cfg.Content onClose={closeModal} />
+                        </Modal>
+                    )}
+                    {showExpiry && (
+                        <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 2000 }}>
+                            <div className="modal-dialog modal-dialog-centered">
+                                <div className="modal-content border-warning">
+                                    <div className="modal-header bg-warning">
+                                        <h5 className="modal-title">Session Expiring</h5>
+                                    </div>
+                                    <div className="modal-body text-center">
+                                        <p className="mb-1">Your session will expire in</p>
+                                        <h2 className="text-danger fw-bold">{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}</h2>
+                                        <p className="text-muted small mb-0">Click below to stay signed in, or you will be logged out automatically.</p>
+                                    </div>
+                                    <div className="modal-footer justify-content-center">
+                                        <button className="btn btn-success btn-lg" onClick={refresh}>Stay Signed In</button>
+                                        <button className="btn btn-outline-secondary" onClick={logout}>Logout Now</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
 
-        // ─── Render ──────────────────────────────────────────────────────
+        // ─── Render ────────────────────────────────────────────────────────
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(

@@ -15,7 +15,7 @@ export default async function authRoutes(fastify) {
 
     const redirectTo = client.buildAuthorizationUrl(oidcConfig, {
       redirect_uri: callbackUrl,
-      scope: 'openid profile email',
+      scope: 'openid profile email offline_access',
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
       state,
@@ -51,11 +51,13 @@ export default async function authRoutes(fastify) {
     const claims = tokens.claims();
 
     // Store tokens server-side in session — never sent to browser
+    const expiresAt = Date.now() + (tokens.expires_in * 1000);
     request.session.tokens = {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       id_token: tokens.id_token,
       expires_in: tokens.expires_in,
+      expires_at: expiresAt,
     };
 
     // User profile from ID token claims (no extra userinfo call needed)
@@ -72,12 +74,57 @@ export default async function authRoutes(fastify) {
   });
 
   // Return current auth status (no tokens exposed)
-  fastify.get('/status', async (request) => {
+  // 200 = authenticated, 401 = no session, 419 = session expired
+  fastify.get('/status', async (request, reply) => {
     const user = request.session?.user || null;
-    return {
-      isAuthenticated: !!user,
-      user,
+    const expiresAt = request.session?.tokens?.expires_at || null;
+
+    // Access token expired — destroy session, signal expired
+    if (expiresAt && Date.now() >= expiresAt) {
+      await new Promise((resolve, reject) => {
+        request.session.destroy((err) => { if (err) reject(err); else resolve(); });
+      });
+      return reply.status(419).send({ error: 'Session expired' });
+    }
+
+    // No session at all
+    if (!user) {
+      return reply.status(401).send({ error: 'Not authenticated' });
+    }
+
+    return { user, expiresAt };
+  });
+
+  // Refresh access token using the refresh token
+  fastify.post('/refresh', async (request, reply) => {
+    const sessionTokens = request.session?.tokens;
+
+    if (!sessionTokens?.refresh_token) {
+      return reply.status(401).send({ error: 'No refresh token available' });
+    }
+
+    let tokens;
+    try {
+      tokens = await client.refreshTokenGrant(oidcConfig, sessionTokens.refresh_token);
+    } catch (err) {
+      fastify.log.error(err, 'Token refresh failed');
+      // Refresh token is invalid/expired — destroy session
+      await new Promise((resolve, reject) => {
+        request.session.destroy((err) => { if (err) reject(err); else resolve(); });
+      });
+      return reply.status(401).send({ error: 'Token refresh failed' });
+    }
+
+    const expiresAt = Date.now() + (tokens.expires_in * 1000);
+    request.session.tokens = {
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token || sessionTokens.refresh_token,
+      id_token: tokens.id_token || sessionTokens.id_token,
+      expires_in: tokens.expires_in,
+      expires_at: expiresAt,
     };
+
+    return { ok: true, expiresAt };
   });
 
   // Destroy session and revoke tokens
