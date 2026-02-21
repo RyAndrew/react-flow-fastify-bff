@@ -21,6 +21,7 @@
         .log-table { font-size: 0.75rem; }
         .log-table td, .log-table th { white-space: nowrap; max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
         .json-pre { background: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 0.75rem; max-height: 200px; overflow: auto; text-align: left; white-space: pre-wrap; word-break: break-all; }
+        .update-modal-min-height { min-height: 475px; }
     </style>
 </head>
 <body>
@@ -191,7 +192,7 @@
             return (
                 <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
                     <div className={`modal-dialog modal-dialog-centered modal-dialog-scrollable ${size || ''}`}>
-                        <div className="modal-content">
+                        <div className="modal-content update-modal-min-height">
                             <div className="modal-header">
                                 <h5 className="modal-title">{title}</h5>
                                 <button type="button" className="btn-close" onClick={onClose}></button>
@@ -367,10 +368,283 @@
 
         // ─── Update User Modal Content (multi-task) ────────────────────────
 
+        // ─── Enroll Factor Content (fetches catalog, user picks factor) ───
+
+        const FACTOR_PAYLOAD_TEMPLATES = {
+            'sms':                  (f) => ({ factorType: f.factorType, provider: f.provider, profile: { phoneNumber: '+1-555-555-0100' } }),
+            'call':                 (f) => ({ factorType: f.factorType, provider: f.provider, profile: { phoneNumber: '+1-555-555-0100' } }),
+            'email':                (f) => ({ factorType: f.factorType, provider: f.provider, profile: { email: 'user@example.com' } }),
+            'token:software:totp':  (f) => ({ factorType: f.factorType, provider: f.provider }),
+            'push':                 (f) => ({ factorType: f.factorType, provider: f.provider }),
+            'question':             (f) => ({ factorType: f.factorType, provider: f.provider, profile: { question: 'dispirated_food', answer: 'pizza' } }),
+            'webauthn':             (f) => ({ factorType: f.factorType, provider: f.provider }),
+            'u2f':                  (f) => ({ factorType: f.factorType, provider: f.provider }),
+            'token:hotp':           (f) => ({ factorType: f.factorType, provider: f.provider }),
+        };
+
+        const buildFactorPayload = (factor) => {
+            const tmpl = FACTOR_PAYLOAD_TEMPLATES[factor.factorType];
+            if (tmpl) return tmpl(factor);
+            return { factorType: factor.factorType, provider: factor.provider };
+        };
+
+        const factorDisplayName = (f) => {
+            const labels = {
+                'sms': 'SMS', 'call': 'Voice Call', 'email': 'Email',
+                'token:software:totp': 'TOTP (Authenticator App)', 'push': 'Okta Verify Push',
+                'question': 'Security Question', 'webauthn': 'WebAuthn (FIDO2)',
+                'u2f': 'U2F', 'token:hotp': 'HOTP Token',
+            };
+            return `${labels[f.factorType] || f.factorType} — ${f.provider}`;
+        };
+
+        const EnrollFactorContent = ({ userId }) => {
+            const [catalog, setCatalog] = useState([]);
+            const [catalogLoading, setCatalogLoading] = useState(true);
+            const [catalogError, setCatalogError] = useState(null);
+            const [selectedIdx, setSelectedIdx] = useState('');
+            const [payload, setPayload] = useState('');
+            const [status, setStatus] = useState('idle');
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            useEffect(() => {
+                setCatalogLoading(true);
+                setCatalogError(null);
+                setCatalog([]);
+                setSelectedIdx('');
+                setPayload('');
+                setStatus('idle');
+                setResult(null);
+                setError(null);
+                api(`/api/v1/users/${userId}/factors/catalog`).then(({ ok, data }) => {
+                    if (ok) {
+                        setCatalog(data.factors || []);
+                    } else {
+                        setCatalogError(data.details?.errorSummary || data.error || 'Failed to load factor catalog');
+                    }
+                    setCatalogLoading(false);
+                });
+            }, [userId]);
+
+            const handleFactorChange = (idx) => {
+                setSelectedIdx(idx);
+                setStatus('idle');
+                setResult(null);
+                setError(null);
+                if (idx === '') { setPayload(''); return; }
+                const factor = catalog[parseInt(idx, 10)];
+                setPayload(JSON.stringify(buildFactorPayload(factor), null, 2));
+            };
+
+            const handleEnroll = async () => {
+                let parsed;
+                try { parsed = JSON.parse(payload); } catch { setError('Invalid JSON'); return; }
+                setStatus('running'); setError(null);
+                const { ok, data } = await apiPost(`/api/v1/users/${userId}/factors`, parsed);
+                if (ok) { setStatus('done'); setResult(data); }
+                else { setStatus('error'); setError(data.details?.errorSummary || data.error || 'Enrollment failed'); }
+            };
+
+            const reset = () => { setStatus('idle'); setResult(null); setError(null); };
+
+            if (catalogLoading) return <div className="text-center py-3"><div className="spinner-border spinner-border-sm text-info" /></div>;
+            if (catalogError) return <div className="alert alert-danger small">{catalogError}</div>;
+            if (!catalog.length) return <div className="alert alert-info small mb-0">No enrollable factors available for this user.</div>;
+
+            return (
+                <div>
+                    <div className="mb-2 font-monospace small">
+                        <span className="badge bg-dark me-2">POST</span>
+                        <code>/api/v1/users/{userId}/factors</code>
+                    </div>
+                    <label className="form-label small fw-bold">Select a factor to enroll:</label>
+                    <select className="form-select mb-3" value={selectedIdx} onChange={e => handleFactorChange(e.target.value)}>
+                        <option value="">-- Choose a factor --</option>
+                        {catalog.map((f, i) => (
+                            <option key={`${f.factorType}-${f.provider}-${i}`} value={i}>
+                                {factorDisplayName(f)}
+                            </option>
+                        ))}
+                    </select>
+                    {selectedIdx !== '' && status === 'idle' && (
+                        <div>
+                            <label className="form-label small fw-bold">Payload (edit before sending):</label>
+                            <textarea className="form-control font-monospace mb-2" rows={6} style={{ fontSize: '0.8rem' }}
+                                value={payload} onChange={e => setPayload(e.target.value)} />
+                            {error && <p className="text-danger small mb-1">{error}</p>}
+                            <button className="btn btn-info btn-sm" onClick={handleEnroll}>Enroll Factor</button>
+                        </div>
+                    )}
+                    {status === 'running' && <div className="text-center py-2"><div className="spinner-border spinner-border-sm text-primary" /></div>}
+                    {status === 'done' && (
+                        <div>
+                            <div className="text-success fw-bold small mb-1">&#10003; Factor enrolled successfully</div>
+                            <pre className="json-pre">{fmtJson(result)}</pre>
+                            <button className="btn btn-outline-secondary btn-sm mt-1" onClick={reset}>Enroll Another</button>
+                        </div>
+                    )}
+                    {status === 'error' && (
+                        <div>
+                            <p className="text-danger small mb-1">&#10007; {error}</p>
+                            <button className="btn btn-outline-secondary btn-sm" onClick={reset}>Try Again</button>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ─── Add to Group Content (autocomplete group search) ────────────
+
+        const AddToGroupContent = ({ userId }) => {
+            const [query, setQuery] = useState('');
+            const [suggestions, setSuggestions] = useState([]);
+            const [searching, setSearching] = useState(false);
+            const [selectedGroup, setSelectedGroup] = useState(null);
+            const [showDropdown, setShowDropdown] = useState(false);
+            const [status, setStatus] = useState('idle');
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+            const debounceRef = useRef(null);
+            const wrapperRef = useRef(null);
+
+            useEffect(() => {
+                setQuery('');
+                setSuggestions([]);
+                setSelectedGroup(null);
+                setStatus('idle');
+                setResult(null);
+                setError(null);
+            }, [userId]);
+
+            // Close dropdown when clicking outside
+            useEffect(() => {
+                const handleClick = (e) => {
+                    if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+                        setShowDropdown(false);
+                    }
+                };
+                document.addEventListener('mousedown', handleClick);
+                return () => document.removeEventListener('mousedown', handleClick);
+            }, []);
+
+            const handleInputChange = (val) => {
+                setQuery(val);
+                setSelectedGroup(null);
+                setStatus('idle');
+                setResult(null);
+                setError(null);
+                clearTimeout(debounceRef.current);
+                if (val.trim().length < 1) { setSuggestions([]); setShowDropdown(false); return; }
+                setSearching(true);
+                setShowDropdown(true);
+                debounceRef.current = setTimeout(() => {
+                    api(`/api/v1/users/groups/search?q=${encodeURIComponent(val.trim())}`).then(({ ok, data }) => {
+                        if (ok) setSuggestions(data.groups || []);
+                        else setSuggestions([]);
+                        setSearching(false);
+                    });
+                }, 300);
+            };
+
+            const handleSelect = (group) => {
+                setSelectedGroup(group);
+                setQuery(group.profile?.name || group.id);
+                setShowDropdown(false);
+                setStatus('idle');
+                setResult(null);
+                setError(null);
+            };
+
+            const handleAddToGroup = async () => {
+                if (!selectedGroup) return;
+                setStatus('running'); setError(null);
+                const { ok, data } = await api(`/api/v1/users/${userId}/groups/${selectedGroup.id}`, { method: 'PUT' });
+                if (ok) { setStatus('done'); setResult({ groupId: selectedGroup.id, groupName: selectedGroup.profile?.name }); }
+                else { setStatus('error'); setError(data.details?.errorSummary || data.error || 'Failed to add user to group'); }
+            };
+
+            const reset = () => {
+                setStatus('idle'); setResult(null); setError(null);
+                setSelectedGroup(null); setQuery(''); setSuggestions([]);
+            };
+
+            return (
+                <div style={{ 'min-height': '160px' }}>
+                    <div className="mb-2 font-monospace small">
+                        <span className="badge bg-dark me-2">PUT</span>
+                        <code>{selectedGroup
+                            ? `/api/v1/groups/${selectedGroup.id}/users/${userId}`
+                            : `/api/v1/groups/{groupId}/users/${userId}`}</code>
+                    </div>
+                    {status !== 'done' && (
+                        <div ref={wrapperRef} style={{ position: 'relative' }}>
+                            <label className="form-label small fw-bold">Search for a group by name:</label>
+                            <input
+                                type="text" className="form-control mb-1" placeholder="Type a group name..."
+                                value={query} onChange={e => handleInputChange(e.target.value)}
+                                onFocus={() => { if (suggestions.length) setShowDropdown(true); }}
+                            />
+                            {showDropdown && (
+                                <div className="list-group" style={{ position: 'absolute', zIndex: 10, width: '100%', maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                                    {searching && (
+                                        <div className="list-group-item text-center text-muted small py-2">
+                                            <span className="spinner-border spinner-border-sm me-1" /> Searching...
+                                        </div>
+                                    )}
+                                    {!searching && suggestions.length === 0 && query.trim().length > 0 && (
+                                        <div className="list-group-item text-muted small">No groups found</div>
+                                    )}
+                                    {!searching && suggestions.map(g => (
+                                        <button key={g.id} type="button"
+                                            className={`list-group-item list-group-item-action small${selectedGroup?.id === g.id ? ' active' : ''}`}
+                                            onClick={() => handleSelect(g)}>
+                                            <div className="fw-bold">{g.profile?.name || g.id}</div>
+                                            {g.profile?.description && <div className="text-muted small">{g.profile.description}</div>}
+                                            <div className="text-muted small">Type: {g.type} &middot; ID: {g.id}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {selectedGroup && status === 'idle' && (
+                        <div className="mt-2">
+                            <label className="form-label small fw-bold">Payload preview:</label>
+                            <pre className="json-pre">{fmtJson({
+                                method: 'PUT',
+                                url: `/api/v1/groups/${selectedGroup.id}/users/${userId}`,
+                                group: { id: selectedGroup.id, name: selectedGroup.profile?.name, type: selectedGroup.type },
+                            })}</pre>
+                            {error && <p className="text-danger small mb-1">{error}</p>}
+                            <button className="btn btn-primary btn-sm" onClick={handleAddToGroup}>Add to Group</button>
+                        </div>
+                    )}
+                    {status === 'running' && <div className="text-center py-2"><div className="spinner-border spinner-border-sm text-primary" /></div>}
+                    {status === 'done' && (
+                        <div>
+                            <div className="text-success fw-bold small mb-1">&#10003; User added to group "{result.groupName}"</div>
+                            <pre className="json-pre">{fmtJson(result)}</pre>
+                            <button className="btn btn-outline-secondary btn-sm mt-1" onClick={reset}>Add to Another Group</button>
+                        </div>
+                    )}
+                    {status === 'error' && (
+                        <div>
+                            <p className="text-danger small mb-1">&#10007; {error}</p>
+                            <button className="btn btn-outline-secondary btn-sm" onClick={reset}>Try Again</button>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ─── Update User Modal Content (multi-task) ────────────────────────
+
         const UPDATE_TASKS = [
             { key: 'profile', label: 'Update Profile' },
             { key: 'password', label: 'Update Password' },
             { key: 'factor', label: 'Enroll Authenticator' },
+            { key: 'group', label: 'Add to Group' },
         ];
 
         const UpdateUserContent = ({ onClose }) => {
@@ -398,12 +672,6 @@
                 credentials: {
                     password: { value: 'NewP@ssw0rd!' },
                 },
-            }, null, 2);
-
-            const factorPayload = JSON.stringify({
-                factorType: 'sms',
-                provider: 'OKTA',
-                profile: { phoneNumber: '+1-555-555-0100' },
             }, null, 2);
 
             return (
@@ -435,11 +703,10 @@
                                     />
                                 )}
                                 {activeTask === 'factor' && (
-                                    <PayloadTask
-                                        url={`/api/v1/users/${selectedId}/factors`}
-                                        method="POST" buttonLabel="Enroll Factor" buttonColor="info"
-                                        defaultPayload={factorPayload}
-                                    />
+                                    <EnrollFactorContent userId={selectedId} />
+                                )}
+                                {activeTask === 'group' && (
+                                    <AddToGroupContent userId={selectedId} />
                                 )}
                             </div>
                         )}
@@ -655,7 +922,7 @@
             <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div></>
         );
         const LogsContentUpdate = ({ onClose }) => (
-            <><div className="modal-body"><LogViewer urlFilter="/update,/credentials,/factors" /></div>
+            <><div className="modal-body"><LogViewer urlFilter="/update,/credentials,/factors,/groups" /></div>
             <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div></>
         );
         const LogsContentLifecycle = ({ onClose }) => (

@@ -103,6 +103,49 @@ export default async function userRoutes(fastify) {
     return { ok: true, user: data };
   });
 
+  // GET /groups/search?q= — search groups by name
+  fastify.get('/groups/search', async (request, reply) => {
+    const q = request.query.q || '';
+    const url = `${downstreamApiUrl}/api/v1/groups?q=${encodeURIComponent(q)}&limit=20`;
+    const { response, data } = await callDownstream(request, 'GET', url, null);
+
+    if (!response.ok) {
+      fastify.log.error({ status: response.status, data }, 'Search groups failed');
+      return reply.status(response.status).send({ error: 'Downstream API error', details: data });
+    }
+
+    return { ok: true, groups: data };
+  });
+
+  // PUT /:oktaId/groups/:groupId — add user to a group
+  fastify.put('/:oktaId/groups/:groupId', async (request, reply) => {
+    const { oktaId, groupId } = request.params;
+    const url = `${downstreamApiUrl}/api/v1/groups/${groupId}/users/${oktaId}`;
+    const { response, data } = await callDownstream(request, 'PUT', url, null);
+
+    if (!response.ok) {
+      fastify.log.error({ status: response.status, data }, 'Add user to group failed');
+      return reply.status(response.status).send({ error: 'Downstream API error', details: data });
+    }
+
+    return { ok: true };
+  });
+
+  // GET /:oktaId/factors/catalog — list enrollable factors
+  fastify.get('/:oktaId/factors/catalog', async (request, reply) => {
+    const { oktaId } = request.params;
+
+    const url = `${downstreamApiUrl}/api/v1/users/${oktaId}/factors/catalog`;
+    const { response, data } = await callDownstream(request, 'GET', url, null);
+
+    if (!response.ok) {
+      fastify.log.error({ status: response.status, data }, 'Fetch factors catalog failed');
+      return reply.status(response.status).send({ error: 'Downstream API error', details: data });
+    }
+
+    return { ok: true, factors: data };
+  });
+
   // POST /:oktaId/factors — enroll an authenticator/factor
   fastify.post('/:oktaId/factors', async (request, reply) => {
     const { oktaId } = request.params;
