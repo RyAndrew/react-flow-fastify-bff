@@ -1,48 +1,11 @@
 import { db } from '../db.js';
+import { requireAccessToken } from '../lib/auth-guards.js';
+import { callDownstream } from '../lib/downstream.js';
 
 export default async function userRoutes(fastify) {
   const downstreamApiUrl = 'http://127.0.0.1:3000';
 
-  // Auth guard
-  fastify.addHook('preHandler', async (request, reply) => {
-    if (!request.session?.tokens?.access_token) {
-      return reply.status(401).send({ error: 'Not authenticated' });
-    }
-  });
-
-  // Helper: call downstream API and attach info to request for the logger
-  async function callDownstream(request, method, url, body) {
-    const { access_token } = request.session.tokens;
-    const dsBody = body ? JSON.stringify(body) : undefined;
-    const dsStart = process.hrtime.bigint();
-
-    const response = await fetch(url, {
-      method,
-      headers: {
-        'Authorization': `Bearer ${access_token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: dsBody,
-    });
-
-    let data = null;
-    const text = await response.text();
-    try { data = JSON.parse(text); } catch { data = text || null; }
-
-    const dsDuration = Number((process.hrtime.bigint() - dsStart) / 1_000_000n);
-
-    request.downstream = {
-      url,
-      method,
-      status_code: response.status,
-      request_body: dsBody || null,
-      response_body: typeof data === 'string' ? data : JSON.stringify(data),
-      duration_ms: dsDuration,
-    };
-
-    return { response, data };
-  }
+  fastify.addHook('preHandler', requireAccessToken);
 
   // GET / — list users from local DB
   fastify.get('/', async () => {
