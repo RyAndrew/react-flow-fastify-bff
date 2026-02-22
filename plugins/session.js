@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import cookie from '@fastify/cookie';
 import session from '@fastify/session';
-import { KnexSessionStore } from '../session-store.js';
+import { KnexSessionStore } from './session-store.js';
 
 async function sessionPlugin(fastify, opts) {
   await fastify.register(cookie);
