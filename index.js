@@ -28,7 +28,7 @@ for (const key of required) {
 
 // ─── App ─────────────────────────────────────────────────────────────
 
-const fastify = Fastify({ logger: true });
+const fastify = Fastify({ logger: { base: null } });
 
 fastify.decorate('appConfig', config);
 
