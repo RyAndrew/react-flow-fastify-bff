@@ -1,12 +1,8 @@
 import { db } from '../db.js';
+import { requireSession } from '../lib/auth-guards.js';
 
 export default async function logRoutes(fastify) {
-  // Auth guard
-  fastify.addHook('preHandler', async (request, reply) => {
-    if (!request.session?.user) {
-      return reply.status(401).send({ error: 'Not authenticated' });
-    }
-  });
+  fastify.addHook('preHandler', requireSession);
 
   // GET / — return recent request logs
   // ?url_contains=comma,separated,patterns — filter to logs whose URL matches any pattern
