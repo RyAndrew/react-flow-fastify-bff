@@ -28,8 +28,10 @@ for (const key of required) {
 
 // ─── App ─────────────────────────────────────────────────────────────
 
-const fastify = Fastify({ logger: { base: null } });
-
+const fastify = Fastify({
+  logger: { base:null },
+  disableRequestLogging:true,
+});
 fastify.decorate('appConfig', config);
 
 // Run migrations on startup

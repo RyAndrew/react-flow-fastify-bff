@@ -44,10 +44,7 @@ async function requestLoggerPlugin(fastify, opts) {
   });
 
   fastify.addHook('preHandler', async (request) => {
-    const user = request.session?.user;
-    if (user) {
-      request.log = request.log.child({ user: user.name || user.email });
-    }
+    request.log.info({ req: {method: request.method, url:request.url, host:request.host, remoteAddress:request.remoteAddress, }, sessionId: request.session?.sessionId, user: (request.session?.user?.name || request.session?.user?.email|| '') });
   });
 
   fastify.addHook('onError', async (request, _reply, error) => {
