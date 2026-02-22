@@ -2,7 +2,10 @@ export default async function authRoutes(fastify) {
   const { oidc, appConfig } = fastify;
   const { config: oidcConfig, client } = oidc;
 
-  const callbackUrl = `${appConfig.APP_URL}/api/v1/auth/callback`;
+  const errorRedirect = (reply, message) =>
+    reply.redirect(`/?error=${encodeURIComponent(message)}`);
+
+  const callbackUrl = `${appConfig.APP_URL}/auth/callback`;
 
   // Redirect to Okta authorize endpoint
   fastify.get('/login', async (request, reply) => {
@@ -31,7 +34,7 @@ export default async function authRoutes(fastify) {
 
     if (!codeVerifier) {
       fastify.log.error('No code_verifier found in session');
-      return reply.status(400).send({ error: 'Invalid authentication state' });
+      return errorRedirect(reply, 'Invalid authentication state');
     }
 
     const currentUrl = new URL(request.url, appConfig.APP_URL);
@@ -45,7 +48,7 @@ export default async function authRoutes(fastify) {
       });
     } catch (err) {
       fastify.log.error(err, 'OAuth token exchange failed');
-      return reply.status(500).send({ error: 'Authentication failed' });
+      return errorRedirect(reply, 'Authentication failed');
     }
 
     const claims = tokens.claims();
@@ -127,7 +130,7 @@ export default async function authRoutes(fastify) {
     return { ok: true, expiresAt };
   });
 
-  // Destroy session and revoke tokens
+  // Destroy session, revoke tokens, and return Okta end-session URL
   fastify.post('/logout', async (request, reply) => {
     const sessionTokens = request.session?.tokens;
 
@@ -139,6 +142,19 @@ export default async function authRoutes(fastify) {
       }
     }
 
+    // Build end-session URL before destroying session (requires id_token)
+    let endSessionUrl = null;
+    if (sessionTokens?.id_token) {
+      try {
+        endSessionUrl = client.buildEndSessionUrl(oidcConfig, {
+          id_token_hint: sessionTokens.id_token,
+          post_logout_redirect_uri: `${appConfig.APP_URL}/`,
+        }).href;
+      } catch (err) {
+        fastify.log.warn(err, 'Failed to build end-session URL');
+      }
+    }
+
     await new Promise((resolve, reject) => {
       request.session.destroy((err) => {
         if (err) reject(err);
@@ -146,6 +162,6 @@ export default async function authRoutes(fastify) {
       });
     });
 
-    return { ok: true };
+    return { ok: true, endSessionUrl };
   });
 }

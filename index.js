@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import path from 'path';
-import fs from 'fs';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { db } from './db.js';
@@ -61,15 +60,15 @@ await fastify.register(oidcPlugin, {
 });
 
 // API routes
-await fastify.register(authRoutes, { prefix: '/api/v1/auth' });
+await fastify.register(authRoutes, { prefix: '/auth' });
 await fastify.register(userRoutes, { prefix: '/api/v1/users' });
 await fastify.register(logRoutes, { prefix: '/api/v1/logs' });
 
-// SPA fallback
-fastify.setNotFoundHandler((request, reply) => {
-  if (request.url.startsWith('/api/')) {
-    return reply.status(404).send({ error: 'Not found' });
-  }
+// Serve the SPA
+fastify.get('/', (_request, reply) => {
+  reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  reply.header('Pragma', 'no-cache');
+  reply.header('Expires', '0');
   return reply.sendFile('index.html');
 });
 
