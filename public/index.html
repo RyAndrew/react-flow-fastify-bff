@@ -62,6 +62,10 @@
         const WARNING_BEFORE_MS = 2 * 60 * 1000; // show warning 2 minutes before expiry
 
         const SessionAuthProvider = ({ children }) => {
+            // Capture before App's useState initializer calls history.replaceState and clears it.
+            // useRef persists the value across re-renders without triggering effects.
+            const initialError = useRef(new URLSearchParams(window.location.search).get('error'));
+
             const [authState, setAuthState] = useState({
                 isAuthenticated: false, isLoading: true, user: null, expiresAt: null,
             });
@@ -129,7 +133,7 @@
             useEffect(() => {
                 // If redirected back with an auth error, skip the status check entirely —
                 // the error modal will handle the next action.
-                if (new URLSearchParams(window.location.search).get('error')) {
+                if (initialError.current) {
                     setAuthState(prev => ({ ...prev, isLoading: false }));
                     return clearTimers;
                 }

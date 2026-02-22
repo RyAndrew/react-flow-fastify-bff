@@ -29,6 +29,13 @@ export default async function authRoutes(fastify) {
 
   // Handle Okta OAuth callback
   fastify.get('/callback', async (request, reply) => {
+    // Okta returned an error at the authorization step (e.g. access_denied, login_required)
+    if (request.query.error) {
+      const message = request.query.error_description || request.query.error;
+      fastify.log.error({ error: request.query.error, description: message }, 'Okta authorization error');
+      return errorRedirect(reply, message);
+    }
+
     const codeVerifier = request.session.codeVerifier;
     const expectedState = request.session.state;
 
@@ -48,7 +55,8 @@ export default async function authRoutes(fastify) {
       });
     } catch (err) {
       fastify.log.error(err, 'OAuth token exchange failed');
-      return errorRedirect(reply, 'Authentication failed');
+      const message = err.error_description || err.error || err.message || 'Authentication failed';
+      return errorRedirect(reply, message);
     }
 
     const claims = tokens.claims();
