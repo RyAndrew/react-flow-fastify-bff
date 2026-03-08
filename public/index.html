@@ -55,6 +55,32 @@
 
         const fmtJson = (v) => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); } catch { return String(v); } };
 
+        // ─── SCIM Client Constants ─────────────────────────────────────────
+
+        const SCIM_RESOURCE_TYPES = ['Users', 'Groups'];
+        const SCIM_ACTIONS = ['list', 'get', 'create', 'replace', 'patch', 'delete'];
+        const SCIM_ACTION_LABELS  = { list: 'List', get: 'Get', create: 'Create', replace: 'Replace', patch: 'Patch', delete: 'Delete' };
+        const SCIM_ACTION_METHODS = { list: 'GET', get: 'GET', create: 'POST', replace: 'PUT', patch: 'PATCH', delete: 'DELETE' };
+        const SCIM_ACTION_COLORS  = { list: 'primary', get: 'info', create: 'success', replace: 'warning', patch: 'secondary', delete: 'danger' };
+
+        const getScimDefaultPayload = (resourceType, action) => {
+            const ts = Date.now();
+            const defaults = {
+                Users: {
+                    create:  { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: `user.${ts}@example.com`, name: { givenName: 'Test', familyName: 'User' }, emails: [{ value: `user.${ts}@example.com`, type: 'work', primary: true }], active: true },
+                    replace: { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: 'testuser@example.com', name: { givenName: 'Updated', familyName: 'User' }, emails: [{ value: 'testuser@example.com', type: 'work', primary: true }], active: true },
+                    patch:   { schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'], Operations: [{ op: 'replace', path: 'active', value: false }] },
+                },
+                Groups: {
+                    create:  { schemas: ['urn:ietf:params:scim:schemas:core:2.0:Group'], displayName: `Test Group ${ts}`, members: [] },
+                    replace: { schemas: ['urn:ietf:params:scim:schemas:core:2.0:Group'], displayName: 'Updated Group', members: [] },
+                    patch:   { schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'], Operations: [{ op: 'replace', path: 'displayName', value: 'New Name' }] },
+                },
+            };
+            const d = defaults[resourceType]?.[action];
+            return d ? JSON.stringify(d, null, 2) : '';
+        };
+
         // ─── Auth Context ──────────────────────────────────────────────────
 
         const SessionAuthContext = createContext();
@@ -949,6 +975,531 @@
             <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div></>
         );
 
+        // ─── SCIM Server Manager ──────────────────────────────────────────
+
+        const ScimServerManager = ({ onClose, onChanged }) => {
+            const [servers, setServers] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [editingId, setEditingId] = useState(null);
+            const [form, setForm] = useState({ name: '', url: '', username: '', password: '' });
+            const [saving, setSaving] = useState(false);
+            const [deleting, setDeleting] = useState(null);
+            const [error, setError] = useState(null);
+
+            const loadServers = () => {
+                setLoading(true);
+                api('/api/v1/scim-servers').then(({ data }) => {
+                    setServers(data.servers || []);
+                    setLoading(false);
+                });
+            };
+            useEffect(loadServers, []);
+
+            const handleEdit = (s) => {
+                setEditingId(s.id);
+                setForm({ name: s.name, url: s.url, username: s.username, password: '' });
+                setError(null);
+            };
+
+            const handleCancel = () => {
+                setEditingId(null);
+                setForm({ name: '', url: '', username: '', password: '' });
+                setError(null);
+            };
+
+            const handleSave = async () => {
+                setSaving(true); setError(null);
+                const method = editingId ? 'PUT' : 'POST';
+                const url = editingId ? `/api/v1/scim-servers/${editingId}` : '/api/v1/scim-servers';
+                const { ok, data } = await api(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(form),
+                });
+                setSaving(false);
+                if (ok) {
+                    handleCancel();
+                    loadServers();
+                    onChanged();
+                } else {
+                    setError(data?.error || 'Save failed');
+                }
+            };
+
+            const handleDelete = async (id) => {
+                setDeleting(id);
+                await api(`/api/v1/scim-servers/${id}`, { method: 'DELETE' });
+                setDeleting(null);
+                loadServers();
+                onChanged();
+            };
+
+            const setField = (field) => (e) => setForm(p => ({ ...p, [field]: e.target.value }));
+
+            return (
+                <Modal show={true} onClose={onClose} title="SCIM Servers" size="modal-lg">
+                    <div className="modal-body">
+                        {loading ? (
+                            <div className="text-center py-3"><div className="spinner-border spinner-border-sm" /></div>
+                        ) : servers.length === 0 ? (
+                            <p className="text-muted small">No servers configured yet. Add one below.</p>
+                        ) : (
+                            <table className="table table-sm table-bordered mb-4">
+                                <thead className="table-light">
+                                    <tr><th>Name</th><th>URL</th><th>Username</th><th style={{ width: '130px' }}></th></tr>
+                                </thead>
+                                <tbody>
+                                    {servers.map(s => (
+                                        <tr key={s.id}>
+                                            <td>{s.name}</td>
+                                            <td><code className="small">{s.url}</code></td>
+                                            <td>{s.username}</td>
+                                            <td>
+                                                <button className="btn btn-outline-primary btn-sm me-1" onClick={() => handleEdit(s)}>Edit</button>
+                                                <button className="btn btn-outline-danger btn-sm"
+                                                    disabled={deleting === s.id}
+                                                    onClick={() => handleDelete(s.id)}>
+                                                    {deleting === s.id ? <span className="spinner-border spinner-border-sm" /> : 'Delete'}
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+
+                        <h6 className="fw-bold border-top pt-3">{editingId ? 'Edit Server' : 'Add Server'}</h6>
+                        {error && <div className="alert alert-danger py-2 small">{error}</div>}
+                        <div className="row g-2">
+                            <div className="col-md-6">
+                                <label className="form-label small">Name</label>
+                                <input className="form-control form-control-sm" placeholder="e.g. Production"
+                                    value={form.name} onChange={setField('name')} />
+                            </div>
+                            <div className="col-md-6">
+                                <label className="form-label small">URL</label>
+                                <input className="form-control form-control-sm font-monospace" placeholder="http://localhost:8080"
+                                    value={form.url} onChange={setField('url')} />
+                            </div>
+                            <div className="col-md-6">
+                                <label className="form-label small">Username</label>
+                                <input className="form-control form-control-sm" placeholder="Username"
+                                    value={form.username} onChange={setField('username')} />
+                            </div>
+                            <div className="col-md-6">
+                                <label className="form-label small">Password</label>
+                                <input type="password" className="form-control form-control-sm"
+                                    placeholder={editingId ? 'Leave blank to keep current' : 'Password'}
+                                    value={form.password} onChange={setField('password')} />
+                            </div>
+                        </div>
+                        <div className="mt-3 d-flex gap-2">
+                            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+                                {saving && <span className="spinner-border spinner-border-sm me-1" />}
+                                {editingId ? 'Save Changes' : 'Add Server'}
+                            </button>
+                            {editingId && <button className="btn btn-outline-secondary btn-sm" onClick={handleCancel}>Cancel</button>}
+                        </div>
+                    </div>
+                    <div className="modal-footer">
+                        <button className="btn btn-secondary" onClick={onClose}>Close</button>
+                    </div>
+                </Modal>
+            );
+        };
+
+        // ─── SCIM Client ───────────────────────────────────────────────────
+
+        const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
+            const [servers, setServers] = useState([]);
+            const [showServerMgr, setShowServerMgr] = useState(false);
+            const [resourceType, setResourceType] = useState('Users');
+            const [action, setAction] = useState('list');
+            const [idInput, setIdInput] = useState('');
+            const [filterInput, setFilterInput] = useState('');
+            const [startIndex, setStartIndex] = useState('1');
+            const [count, setCount] = useState('10');
+            const [payload, setPayload] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [response, setResponse] = useState(null);
+            const [httpStatus, setHttpStatus] = useState(null);
+            const [error, setError] = useState(null);
+            const [scimTab, setScimTab] = useState('client');
+            const [logKey, setLogKey] = useState(0);
+
+            // Workflow user picker state (used when preset.requiresUser)
+            const [workflowUsers, setWorkflowUsers] = useState([]);
+            const [workflowUsersLoading, setWorkflowUsersLoading] = useState(false);
+            const [selectedWorkflowUserId, setSelectedWorkflowUserId] = useState('');
+            const [lookupLoading, setLookupLoading] = useState(false);
+            const [lookupError, setLookupError] = useState(null);
+            const [presetActive, setPresetActive] = useState(false); // true while a preset is in effect
+
+            const needsId      = ['get', 'replace', 'patch', 'delete'].includes(action);
+            const needsPayload = ['create', 'replace', 'patch'].includes(action);
+            const needsFilter  = action === 'list';
+            const method       = SCIM_ACTION_METHODS[action];
+
+            // Load servers list
+            const loadServers = () => {
+                api('/api/v1/scim-servers').then(({ data }) => {
+                    const list = data.servers || [];
+                    setServers(list);
+                    // Auto-select if only one exists and nothing selected yet
+                    if (list.length === 1 && !serverId) onServerIdChange(String(list[0].id));
+                });
+            };
+            useEffect(loadServers, []);
+
+            // Apply preset from workflow navigation
+            useEffect(() => {
+                if (!preset) return;
+                setScimTab('client');
+                setResourceType(preset.resourceType || 'Users');
+                setAction(preset.action);
+                setIdInput('');
+                setResponse(null); setError(null); setHttpStatus(null);
+                setLookupError(null);
+                setSelectedWorkflowUserId('');
+
+                if (preset.patchOps) {
+                    setPayload(JSON.stringify({
+                        schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'],
+                        Operations: preset.patchOps,
+                    }, null, 2));
+                } else if (['create', 'replace', 'patch'].includes(preset.action)) {
+                    setPayload(getScimDefaultPayload(preset.resourceType || 'Users', preset.action));
+                } else {
+                    setPayload('');
+                }
+
+                setPresetActive(!!preset.requiresUser);
+                if (preset.requiresUser) {
+                    setWorkflowUsersLoading(true);
+                    api('/api/v1/users').then(({ data }) => {
+                        setWorkflowUsers(data.users || []);
+                        setWorkflowUsersLoading(false);
+                    });
+                }
+                onClearPreset();
+            }, [preset]);
+
+            // Reset payload when action/resourceType changes manually (not via preset)
+            useEffect(() => {
+                if (presetActive) return; // preset just applied, skip
+                setResponse(null); setError(null); setHttpStatus(null);
+                setPayload(needsPayload ? getScimDefaultPayload(resourceType, action) : '');
+            }, [action, resourceType]);
+
+            // Look up SCIM user by local user's email/login when user is picked
+            const handleWorkflowUserChange = async (oktaId) => {
+                setSelectedWorkflowUserId(oktaId);
+                setIdInput(''); setLookupError(null);
+                if (!oktaId) return;
+                const user = workflowUsers.find(u => u.okta_id === oktaId);
+                if (!user || !serverId) return;
+
+                setLookupLoading(true);
+                const filter = `userName eq "${user.email}"`;
+                const { ok, data } = await api(
+                    `/api/v1/scim/Users?filter=${encodeURIComponent(filter)}&count=1`,
+                    { headers: { 'X-Scim-Server-Id': serverId } }
+                );
+                setLookupLoading(false);
+
+                const scimUser = ok && data.Resources?.[0];
+                if (scimUser) {
+                    setIdInput(scimUser.id);
+                    // For generic patch (no patchOps), build a name patch from SCIM user data
+                    if (action === 'patch' && !payload.includes('active')) {
+                        setPayload(JSON.stringify({
+                            schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'],
+                            Operations: [
+                                { op: 'replace', path: 'name.givenName', value: scimUser.name?.givenName || user.first_name },
+                                { op: 'replace', path: 'name.familyName', value: scimUser.name?.familyName || user.last_name },
+                            ],
+                        }, null, 2));
+                    }
+                } else {
+                    setLookupError(`No SCIM user found matching "${user.email}" on selected server`);
+                }
+            };
+
+            const buildUrl = () => {
+                const base = `/api/v1/scim/${resourceType}`;
+                if (needsId) return `${base}/${idInput || ':id'}`;
+                if (needsFilter) {
+                    const qs = new URLSearchParams();
+                    if (filterInput.trim()) qs.set('filter', filterInput.trim());
+                    qs.set('startIndex', startIndex || '1');
+                    qs.set('count', count || '10');
+                    return `${base}?${qs.toString()}`;
+                }
+                return base;
+            };
+
+            const handleExecute = async () => {
+                if (!serverId) { setError('Please select a SCIM server'); return; }
+                if (needsId && !idInput.trim()) { setError('Please enter a resource ID'); return; }
+                setLoading(true); setResponse(null); setError(null); setHttpStatus(null);
+
+                let body = null;
+                if (needsPayload) {
+                    try { body = JSON.parse(payload); }
+                    catch { setError('Invalid JSON payload'); setLoading(false); return; }
+                }
+
+                const url = buildUrl();
+                const opts = {
+                    credentials: 'same-origin',
+                    method,
+                    headers: { 'X-Scim-Server-Id': serverId },
+                };
+                if (body) {
+                    opts.headers['Content-Type'] = 'application/json';
+                    opts.body = JSON.stringify(body);
+                }
+
+                try {
+                    const res = await fetch(url, opts);
+                    setHttpStatus(res.status);
+                    if (res.status === 204) { setResponse({ message: '204 No Content — resource deleted' }); setLoading(false); return; }
+                    const text = await res.text();
+                    let data; try { data = JSON.parse(text); } catch { data = text || null; }
+                    if (res.ok) setResponse(data);
+                    else setError(typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data));
+                } catch (e) {
+                    setError(e.message || 'Request failed');
+                }
+                setLoading(false);
+            };
+
+            const resetResult = () => { setResponse(null); setError(null); setHttpStatus(null); };
+
+            const changeAction = (a) => {
+                setAction(a); resetResult();
+                setPresetActive(false); setPresetActive(false);
+                // Reset user picker when manually changing action
+                if (!presetActive) { setSelectedWorkflowUserId(''); setLookupError(null); setIdInput(''); }
+            };
+
+            const changeResourceType = (rt) => {
+                setResourceType(rt); setAction('list'); resetResult();
+                setPresetActive(false);
+                setSelectedWorkflowUserId(''); setLookupError(null); setIdInput('');
+            };
+
+            const statusBadgeClass = httpStatus
+                ? (httpStatus < 300 ? 'bg-success' : httpStatus < 500 ? 'bg-warning text-dark' : 'bg-danger')
+                : 'bg-secondary';
+
+            const selectedServer = servers.find(s => String(s.id) === String(serverId));
+
+            return (
+                <div style={{ height: 'calc(100vh - 56px)', overflow: 'auto' }}>
+                    {showServerMgr && (
+                        <ScimServerManager
+                            onClose={() => setShowServerMgr(false)}
+                            onChanged={loadServers}
+                        />
+                    )}
+                    <div className="container-fluid p-3">
+                        {/* Top tabs */}
+                        <ul className="nav nav-tabs mb-3">
+                            <li className="nav-item">
+                                <button className={`nav-link ${scimTab === 'client' ? 'active' : ''}`} onClick={() => setScimTab('client')}>SCIM Client</button>
+                            </li>
+                            <li className="nav-item">
+                                <button className={`nav-link ${scimTab === 'logs' ? 'active' : ''}`}
+                                    onClick={() => { setScimTab('logs'); setLogKey(k => k + 1); }}>Logs</button>
+                            </li>
+                        </ul>
+
+                        {scimTab === 'logs' && (
+                            <div>
+                                <div className="d-flex justify-content-end mb-2">
+                                    <button className="btn btn-outline-secondary btn-sm" onClick={() => setLogKey(k => k + 1)}>
+                                        ↻ Refresh
+                                    </button>
+                                </div>
+                                <LogViewer key={logKey} urlFilter="/api/v1/scim/" />
+                            </div>
+                        )}
+
+                        {scimTab === 'client' && (
+                            <>
+                                {/* ── Server selector bar ── */}
+                                <div className="d-flex align-items-center gap-2 mb-3 p-2 bg-light border rounded">
+                                    <label className="form-label mb-0 small fw-bold text-nowrap">SCIM Server:</label>
+                                    <select className="form-select form-select-sm"
+                                        value={serverId || ''}
+                                        onChange={e => onServerIdChange(e.target.value)}>
+                                        <option value="">— select a server —</option>
+                                        {servers.map(s => (
+                                            <option key={s.id} value={s.id}>{s.name} — {s.url}</option>
+                                        ))}
+                                    </select>
+                                    <button className="btn btn-outline-secondary btn-sm text-nowrap" onClick={() => setShowServerMgr(true)}>
+                                        Manage Servers
+                                    </button>
+                                </div>
+
+                                <div className="row g-3">
+                                    {/* ── Left: controls ── */}
+                                    <div className="col-md-5">
+                                        {/* Resource type pills */}
+                                        <ul className="nav nav-pills mb-3">
+                                            {SCIM_RESOURCE_TYPES.map(rt => (
+                                                <li className="nav-item" key={rt}>
+                                                    <button className={`nav-link ${resourceType === rt ? 'active' : ''}`}
+                                                        onClick={() => changeResourceType(rt)}>
+                                                        {rt}
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+
+                                        {/* Action buttons */}
+                                        <div className="mb-3 d-flex flex-wrap gap-2">
+                                            {SCIM_ACTIONS.map(a => (
+                                                <button key={a}
+                                                    className={`btn btn-sm ${action === a ? `btn-${SCIM_ACTION_COLORS[a]}` : `btn-outline-${SCIM_ACTION_COLORS[a]}`}`}
+                                                    onClick={() => changeAction(a)}>
+                                                    <span className="badge bg-dark me-1" style={{ fontSize: '0.65rem' }}>{SCIM_ACTION_METHODS[a]}</span>
+                                                    {SCIM_ACTION_LABELS[a]}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* URL preview */}
+                                        <div className="mb-3 p-2 bg-light rounded font-monospace small border">
+                                            <span className="badge bg-dark me-2">{method}</span>
+                                            <code style={{ wordBreak: 'break-all' }}>{buildUrl()}</code>
+                                            {selectedServer && (
+                                                <div className="text-muted mt-1" style={{ fontSize: '0.7rem' }}>
+                                                    → {selectedServer.url}/scim/v2/{resourceType}{needsId && idInput ? `/${idInput}` : ''}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Workflow user picker (shown when preset requires a user) */}
+                                        {presetActive && (
+                                            <div className="mb-3 p-2 border border-info rounded">
+                                                <label className="form-label small fw-bold text-info">
+                                                    From Workflow — pick a user:
+                                                </label>
+                                                {workflowUsersLoading ? (
+                                                    <div className="text-center py-1"><div className="spinner-border spinner-border-sm" /></div>
+                                                ) : (
+                                                    <select className="form-select form-select-sm"
+                                                        value={selectedWorkflowUserId}
+                                                        onChange={e => handleWorkflowUserChange(e.target.value)}>
+                                                        <option value="">— select a user —</option>
+                                                        {workflowUsers.map(u => (
+                                                            <option key={u.okta_id} value={u.okta_id}>
+                                                                {u.first_name} {u.last_name} ({u.email})
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                                {lookupLoading && (
+                                                    <div className="text-muted small mt-1">
+                                                        <span className="spinner-border spinner-border-sm me-1" />
+                                                        Looking up SCIM ID…
+                                                    </div>
+                                                )}
+                                                {lookupError && <div className="text-warning small mt-1">⚠ {lookupError}</div>}
+                                                {idInput && !lookupLoading && (
+                                                    <div className="text-success small mt-1">&#10003; SCIM ID: <code>{idInput}</code></div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Manual ID input */}
+                                        {needsId && (
+                                            <div className="mb-3">
+                                                <label className="form-label small fw-bold">Resource ID{presetActive ? ' (auto-filled above)' : ''}:</label>
+                                                <input type="text" className="form-control form-control-sm font-monospace"
+                                                    placeholder="e.g. a3bf7e5a-1234-..."
+                                                    value={idInput} onChange={e => setIdInput(e.target.value)} />
+                                            </div>
+                                        )}
+
+                                        {/* Filter / pagination for list */}
+                                        {needsFilter && (
+                                            <div className="mb-3">
+                                                <label className="form-label small fw-bold">Filter <span className="text-muted fw-normal">(SCIM filter, optional)</span>:</label>
+                                                <input type="text" className="form-control form-control-sm font-monospace mb-2"
+                                                    placeholder={`userName eq "john@example.com"`}
+                                                    value={filterInput} onChange={e => setFilterInput(e.target.value)} />
+                                                <div className="row g-2">
+                                                    <div className="col">
+                                                        <label className="form-label small">startIndex</label>
+                                                        <input type="number" className="form-control form-control-sm" value={startIndex} onChange={e => setStartIndex(e.target.value)} />
+                                                    </div>
+                                                    <div className="col">
+                                                        <label className="form-label small">count</label>
+                                                        <input type="number" className="form-control form-control-sm" value={count} onChange={e => setCount(e.target.value)} />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Payload editor */}
+                                        {needsPayload && (
+                                            <div className="mb-3">
+                                                <label className="form-label small fw-bold">Request Body:</label>
+                                                <textarea className="form-control font-monospace" rows={10} style={{ fontSize: '0.8rem' }}
+                                                    value={payload} onChange={e => setPayload(e.target.value)} />
+                                            </div>
+                                        )}
+
+                                        <button className={`btn btn-${SCIM_ACTION_COLORS[action]}`}
+                                            onClick={handleExecute}
+                                            disabled={loading || !serverId}>
+                                            {loading && <span className="spinner-border spinner-border-sm me-2" />}
+                                            {loading ? 'Sending…' : `Execute ${SCIM_ACTION_LABELS[action]}`}
+                                        </button>
+                                        {!serverId && <span className="text-muted small ms-2">Select a server first</span>}
+                                    </div>
+
+                                    {/* ── Right: response ── */}
+                                    <div className="col-md-7">
+                                        <div className="d-flex align-items-center mb-2 gap-2">
+                                            <span className="fw-bold small">Response</span>
+                                            {httpStatus && <span className={`badge ${statusBadgeClass}`}>{httpStatus}</span>}
+                                            {(response !== null || error) && (
+                                                <button className="btn btn-outline-secondary btn-sm ms-auto" onClick={resetResult}>Clear</button>
+                                            )}
+                                        </div>
+                                        {loading && <div className="text-center py-4"><div className="spinner-border text-primary" /></div>}
+                                        {!loading && response !== null && (
+                                            <div>
+                                                <div className="text-success fw-bold small mb-1">&#10003; Success</div>
+                                                <pre className="json-pre" style={{ maxHeight: '65vh' }}>{fmtJson(response)}</pre>
+                                            </div>
+                                        )}
+                                        {!loading && error && (
+                                            <div>
+                                                <div className="text-danger fw-bold small mb-1">&#10007; Error</div>
+                                                <pre className="json-pre text-danger" style={{ maxHeight: '65vh' }}>{error}</pre>
+                                            </div>
+                                        )}
+                                        {!loading && response === null && !error && (
+                                            <div className="text-center text-muted py-5">
+                                                <p className="mb-1">No response yet.</p>
+                                                <p className="small">Configure a request on the left and click Execute.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
         // ─── Custom Node Component ─────────────────────────────────────────
 
         const CustomNode = ({ data, id }) => (
@@ -956,7 +1507,8 @@
                 <Handle type="target" position={Position.Top} />
                 <NodeToolbar position="top">
                     <button className="btn btn-sm btn-success me-2" onClick={() => data.onRun(id)}>▶ Run</button>
-                    <button className="btn btn-sm btn-primary" onClick={() => data.onViewLogs(id)}>📄 View Logs</button>
+                    <button className="btn btn-sm btn-primary me-2" onClick={() => data.onViewLogs(id)}>📄 View Logs</button>
+                    <button className="btn btn-sm btn-outline-info" onClick={() => data.onScimNavigate(id)}>↗ SCIM</button>
                 </NodeToolbar>
                 <div>{data.label}</div>
                 <Handle type="source" position={Position.Bottom} />
@@ -987,13 +1539,24 @@
         };
 
         const NODE_TO_MODAL = { '1': 'create', '2': 'update', '3': 'lifecycle', '4': 'delete' };
-        const NODE_TO_LOGS = { '1': 'logs_create', '2': 'logs_update', '3': 'logs_lifecycle', '4': 'logs_delete' };
+        const NODE_TO_LOGS  = { '1': 'logs_create', '2': 'logs_update', '3': 'logs_lifecycle', '4': 'logs_delete' };
+
+        // Workflow node → SCIM preset mapping
+        const NODE_SCIM_PRESETS = {
+            '1': { resourceType: 'Users', action: 'create', requiresUser: false },
+            '2': { resourceType: 'Users', action: 'patch',  requiresUser: true },
+            '3': { resourceType: 'Users', action: 'patch',  requiresUser: true, patchOps: [{ op: 'replace', path: 'active', value: false }] },
+            '4': { resourceType: 'Users', action: 'delete', requiresUser: true },
+        };
 
         // ─── Main App ──────────────────────────────────────────────────────
 
         const App = () => {
             const { isAuthenticated, isLoading, user, logout, refresh, loginRedirect, showExpiry, loggedOut, countdown } = useAuth();
+            const [view, setView] = useState('workflow'); // 'workflow' | 'scim'
             const [modalType, setModalType] = useState(null);
+            const [scimPreset, setScimPreset] = useState(null);
+            const [selectedScimServerId, setSelectedScimServerId] = useState('');
             const [authError] = useState(() => {
                 const params = new URLSearchParams(window.location.search);
                 const err = params.get('error');
@@ -1011,11 +1574,16 @@
                 setModalType(NODE_TO_LOGS[nodeId] || 'logs_create');
             }, []);
 
+            const handleScimNavigate = useCallback((nodeId) => {
+                setScimPreset(NODE_SCIM_PRESETS[nodeId] || null);
+                setView('scim');
+            }, []);
+
             const initialNodes = [
-                { id: '1', type: 'custom', data: { label: '1. Create User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 50 }, className: 'create' },
-                { id: '2', type: 'custom', data: { label: '2. Update User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 150 }, className: 'update' },
-                { id: '3', type: 'custom', data: { label: '3. Suspend User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 250 }, className: 'suspend' },
-                { id: '4', type: 'custom', data: { label: '4. Delete User', onRun: handleRun, onViewLogs: handleViewLogs }, position: { x: 250, y: 350 }, className: 'delete' },
+                { id: '1', type: 'custom', data: { label: '1. Create User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 50 },  className: 'create' },
+                { id: '2', type: 'custom', data: { label: '2. Update User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 150 }, className: 'update' },
+                { id: '3', type: 'custom', data: { label: '3. Suspend User', onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 250 }, className: 'suspend' },
+                { id: '4', type: 'custom', data: { label: '4. Delete User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 350 }, className: 'delete' },
             ];
 
             const [nodes, setNodes] = useState(initialNodes);
@@ -1073,18 +1641,29 @@
                     <nav className="navbar navbar-dark bg-dark">
                         <div className="container-fluid">
                             <span className="navbar-brand mb-0 h1">User Management Process Flow</span>
-                            <div className="d-flex align-items-center">
-                                <span className="text-light me-3">{user?.name}</span>
+                            <div className="d-flex align-items-center gap-2">
+                                <button className={`btn btn-sm ${view === 'workflow' ? 'btn-light' : 'btn-outline-light'}`} onClick={() => setView('workflow')}>Workflow</button>
+                                <button className={`btn btn-sm ${view === 'scim' ? 'btn-light' : 'btn-outline-light'}`} onClick={() => setView('scim')}>SCIM Client</button>
+                                <span className="text-light ms-2">{user?.name}</span>
                                 <button className="btn btn-outline-light btn-sm" onClick={logout}>Logout</button>
                             </div>
                         </div>
                     </nav>
-                    <div style={{ height: 'calc(100vh - 56px)' }}>
-                        <ReactFlowComponent nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView>
-                            <Controls />
-                            <Background variant="dots" gap={12} size={1} />
-                        </ReactFlowComponent>
-                    </div>
+                    {view === 'workflow' ? (
+                        <div style={{ height: 'calc(100vh - 56px)' }}>
+                            <ReactFlowComponent nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView>
+                                <Controls />
+                                <Background variant="dots" gap={12} size={1} />
+                            </ReactFlowComponent>
+                        </div>
+                    ) : (
+                        <ScimClient
+                            preset={scimPreset}
+                            onClearPreset={() => setScimPreset(null)}
+                            serverId={selectedScimServerId}
+                            onServerIdChange={setSelectedScimServerId}
+                        />
+                    )}
                     {cfg && (
                         <Modal show={true} onClose={closeModal} title={cfg.title} size={cfg.size}>
                             <cfg.Content onClose={closeModal} />

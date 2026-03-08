@@ -9,6 +9,8 @@ import requestLoggerPlugin from './plugins/request-logger.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import logRoutes from './routes/logs.js';
+import scimRoutes from './routes/scim.js';
+import scimServerRoutes from './routes/scim-servers.js';
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -65,6 +67,8 @@ await fastify.register(oidcPlugin, {
 await fastify.register(authRoutes, { prefix: '/auth' });
 await fastify.register(userRoutes, { prefix: '/api/v1/users' });
 await fastify.register(logRoutes, { prefix: '/api/v1/logs' });
+await fastify.register(scimRoutes, { prefix: '/api/v1/scim' });
+await fastify.register(scimServerRoutes, { prefix: '/api/v1/scim-servers' });
 
 // Serve the SPA
 fastify.get('/', (_request, reply) => {
