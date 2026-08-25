@@ -18,9 +18,9 @@ const config = {
   OKTA_ISSUER: process.env.OKTA_ISSUER,
   OKTA_CLIENT_ID: process.env.OKTA_CLIENT_ID,
   OKTA_CLIENT_SECRET: process.env.OKTA_CLIENT_SECRET,
-  APP_URL: process.env.APP_URL || 'http://localhost:3000',
+  APP_URL: process.env.APP_URL || 'http://localhost:3301',
   SESSION_SECRET: process.env.SESSION_SECRET,
-  PORT: parseInt(process.env.PORT || '3000', 10),
+  PORT: process.env.PORT || '3301',
 };
 
 const required = ['OKTA_ISSUER', 'OKTA_CLIENT_ID', 'OKTA_CLIENT_SECRET', 'SESSION_SECRET'];
@@ -29,10 +29,11 @@ for (const key of required) {
 }
 
 // ─── App ─────────────────────────────────────────────────────────────
-
+console.log('starting fastify server')
 const fastify = Fastify({
   logger: { base:null },
   disableRequestLogging:true,
+  trustProxy: true,
 });
 fastify.decorate('appConfig', config);
 
@@ -49,7 +50,8 @@ await fastify.register(fastifyStatic, {
 await fastify.register(sessionPlugin, {
   secret: config.SESSION_SECRET,
   db,
-  secure: config.APP_URL.startsWith('https'),
+  secure: true,
+  //secure: config.APP_URL.startsWith('https'),
 });
 
 // Request logger (persists every API request as one row in SQLite)
@@ -72,6 +74,9 @@ await fastify.register(scimServerRoutes, { prefix: '/api/v1/scim-servers' });
 
 // Serve the SPA
 fastify.get('/', (_request, reply) => {
+
+  console.log(_request.raw.headers);
+
   reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
   reply.header('Pragma', 'no-cache');
   reply.header('Expires', '0');

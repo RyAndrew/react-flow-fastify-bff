@@ -1,4 +1,4 @@
 ﻿node_modules
 .env
 .claude
-app.db
+data/app.db
