@@ -1,4 +1,4 @@
-const CreateUserContent = ({ onClose, initialImportedId }) => {
+const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
     const ts = Date.now();
     const [payload, setPayload] = React.useState(JSON.stringify({
         profile: {
@@ -50,7 +50,10 @@ const CreateUserContent = ({ onClose, initialImportedId }) => {
         const { ok, data } = await apiPost(createUrl, parsed);
         clearTimeout(t);
 
-        if (ok) { setStatus('done'); setProgress(100); setResult(data.user); }
+        if (ok) {
+            setStatus('done'); setProgress(100); setResult(data.user);
+            if (data.localUser) onShowUser(data.localUser);
+        }
         else { setStatus('error'); setProgress(100); setError(data); }
     };
 

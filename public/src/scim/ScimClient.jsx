@@ -1,4 +1,4 @@
-const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
+const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowUser, onGoToCanvas }) => {
     const [servers, setServers] = React.useState([]);
     const [showServerMgr, setShowServerMgr] = React.useState(false);
     const [resourceType, setResourceType] = React.useState('Users');
@@ -14,6 +14,7 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
     const [error, setError] = React.useState(null);
     const [scimTab, setScimTab] = React.useState('client');
     const [logKey, setLogKey] = React.useState(0);
+    const [canvasNotice, setCanvasNotice] = React.useState(null); // after a SCIM create: 'running' | 'done' | error response
 
     // Workflow user picker state (used when preset.requiresUser)
     const [workflowUsers, setWorkflowUsers] = React.useState([]);
@@ -51,8 +52,10 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
         setScimTab('client');
         setResourceType(preset.resourceType || 'Users');
         setAction(preset.action);
-        setIdInput('');
-        setResponse(null); setError(null); setHttpStatus(null);
+        // Presets from a user node / Read Users target one known SCIM user on a known server
+        setIdInput(preset.scimId || '');
+        if (preset.serverId) onServerIdChange(String(preset.serverId));
+        setResponse(null); setError(null); setHttpStatus(null); setCanvasNotice(null);
         setLookupError(null);
         setSelectedWorkflowUserId('');
 
@@ -65,6 +68,12 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
             setPayload(getScimDefaultPayload(preset.resourceType || 'Users', preset.action));
         } else {
             setPayload('');
+        }
+
+        // Patch for a known user: start from that user's current SCIM values
+        if (preset.scimId && preset.action === 'patch' && !preset.patchOps) {
+            api(`/api/v1/scim/Users/${encodeURIComponent(preset.scimId)}`, { headers: { 'X-Scim-Server-Id': String(preset.serverId) } })
+                .then(({ ok, data }) => { if (ok) setPayload(JSON.stringify(buildScimUserPatchFrom(data), null, 2)); });
         }
 
         setPresetActive(!!preset.requiresUser);
@@ -107,12 +116,7 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
             setIdInput(scimUser.id);
             // For generic patch (no patchOps), build an update patch from SCIM user data
             if (action === 'patch' && !payload.includes('"active"')) {
-                setPayload(JSON.stringify(buildScimUserPatch({
-                    givenName:  scimUser.name?.givenName || user.first_name,
-                    familyName: scimUser.name?.familyName || user.last_name,
-                    email:      scimUser.emails?.find(e => e.primary)?.value || scimUser.emails?.[0]?.value || user.email,
-                    address:    scimUser.addresses?.find(a => a.primary) || scimUser.addresses?.[0] || SAMPLE_ADDRESS,
-                }), null, 2));
+                setPayload(JSON.stringify(buildScimUserPatchFrom(scimUser, user), null, 2));
             }
         } else {
             setLookupError(`No SCIM user found matching "${user.email}" on selected server`);
@@ -139,7 +143,7 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
             if (!newPassword) { setError('Please enter a new password'); return; }
             if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
         }
-        setLoading(true); setResponse(null); setError(null); setHttpStatus(null);
+        setLoading(true); setResponse(null); setError(null); setHttpStatus(null); setCanvasNotice(null);
 
         let body = null;
         if (isSetPassword) {
@@ -173,20 +177,27 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
             if (res.ok && isSetPassword) clearPasswordFields();
             if (res.ok) setResponse(data);
             else setError(typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data));
+            if (res.ok && action === 'create' && resourceType === 'Users' && data?.id) addCreatedUserToCanvas(data.id);
         } catch (e) {
             setError(e.message || 'Request failed');
         }
         setLoading(false);
     };
 
-    const resetResult = () => { setResponse(null); setError(null); setHttpStatus(null); };
+    // Like the Create User node: save the new SCIM user to the local DB and add it to the canvas
+    const addCreatedUserToCanvas = async (scimId) => {
+        setCanvasNotice('running');
+        const { ok, data } = await api(`/api/v1/scim/Users/${encodeURIComponent(scimId)}/import`, {
+            method: 'POST',
+            headers: { 'X-Scim-Server-Id': serverId },
+        });
+        if (ok) { onShowUser(data.user); setCanvasNotice('done'); }
+        else setCanvasNotice(data);
+    };
+
+    const resetResult = () => { setResponse(null); setError(null); setHttpStatus(null); setCanvasNotice(null); };
 
     function clearPasswordFields() { setNewPassword(''); setConfirmPassword(''); setShowPassword(false); }
-
-    const handleGeneratePassword = () => {
-        const pw = generatePassword();
-        setNewPassword(pw); setConfirmPassword(pw); setShowPassword(true);
-    };
 
     const changeAction = (a) => {
         setAction(a); resetResult();
@@ -368,31 +379,9 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
 
                                 {/* Set Password inputs (body is built from these, never shown in plaintext) */}
                                 {isSetPassword && (
-                                    <div className="mb-3">
-                                        <label className="form-label small fw-bold">New Password:</label>
-                                        <div className="input-group input-group-sm mb-2">
-                                            <input type={showPassword ? 'text' : 'password'} className="form-control font-monospace"
-                                                autoComplete="new-password"
-                                                value={newPassword} onChange={e => setNewPassword(e.target.value)} />
-                                            <button className="btn btn-outline-secondary" type="button" onClick={() => setShowPassword(s => !s)}>
-                                                {showPassword ? 'Hide' : 'Show'}
-                                            </button>
-                                            <button className="btn btn-outline-secondary" type="button" onClick={handleGeneratePassword}>
-                                                Generate
-                                            </button>
-                                        </div>
-                                        <label className="form-label small fw-bold">Confirm Password:</label>
-                                        <input type={showPassword ? 'text' : 'password'} className="form-control form-control-sm font-monospace mb-1"
-                                            autoComplete="new-password"
-                                            value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
-                                        {confirmPassword && newPassword !== confirmPassword && (
-                                            <div className="text-warning small mb-1">⚠ Passwords do not match</div>
-                                        )}
-                                        <label className="form-label small fw-bold mt-2">Request Body <span className="text-muted fw-normal">(preview, password masked)</span>:</label>
-                                        <pre className="json-pre mb-0" style={{ fontSize: '0.8rem' }}>
-                                            {fmtJson(buildScimPasswordPatch(newPassword ? '••••••••' : ''))}
-                                        </pre>
-                                    </div>
+                                    <ScimPasswordFields
+                                        password={newPassword} confirm={confirmPassword} show={showPassword}
+                                        onPasswordChange={setNewPassword} onConfirmChange={setConfirmPassword} onShowChange={setShowPassword} />
                                 )}
 
                                 <button className={`btn btn-${SCIM_ACTION_COLORS[action]}`}
@@ -417,7 +406,15 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
                                 {!loading && response !== null && (
                                     <div>
                                         <div className="text-success fw-bold small mb-1">&#10003; Success</div>
-                                        {resourceType === 'Users' && <ScimUserResults response={response} serverId={serverId} />}
+                                        {canvasNotice === 'running' && <div className="small text-muted mb-2"><span className="spinner-border spinner-border-sm me-1" />Saving to DB…</div>}
+                                        {canvasNotice === 'done' && (
+                                            <div className="small text-success mb-2">
+                                                &#10003; Saved to DB and added to the canvas
+                                                <button className="btn btn-link btn-sm py-0" onClick={onGoToCanvas}>Go to canvas →</button>
+                                            </div>
+                                        )}
+                                        {canvasNotice && typeof canvasNotice === 'object' && <ApiError data={canvasNotice} compact />}
+                                        {resourceType === 'Users' && <ScimUserResults response={response} serverId={serverId} onShowUser={onShowUser} onGoToCanvas={onGoToCanvas} />}
                                         <pre className="json-pre" style={{ maxHeight: '65vh' }}>{fmtJson(response)}</pre>
                                     </div>
                                 )}

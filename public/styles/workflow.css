@@ -5,4 +5,5 @@
 .react-flow__node.update { border-color: #007bff; background: #cfe2ff; }
 .react-flow__node.suspend { border-color: #ffc107; background: #fff3cd; }
 .react-flow__node.delete { border-color: #dc3545; background: #f8d7da; }
+.react-flow__node.user { border-color: #6c757d; border-style: dashed; background: #f8f9fa; text-align: left; min-width: 180px; }
 .react-flow__node-toolbar { background: white; padding: 4px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }

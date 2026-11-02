@@ -23,7 +23,35 @@ const buildScimUserPatch = ({ givenName, familyName, email, address }) => ({
     ],
 });
 
-const getScimDefaultPayload = (resourceType, action) => {
+// Calls the BFF SCIM proxy (/api/v1/scim/{path}) for one server. Handles 204 and non-JSON bodies;
+// on failure `data` is { error, details } so it can go straight to <ApiError>.
+const scimRequest = async (serverId, method, path, body) => {
+    const opts = { credentials: 'same-origin', method, headers: { 'X-Scim-Server-Id': String(serverId) } };
+    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    const res = await fetch(`/api/v1/scim/${path}`, opts);
+    const text = res.status === 204 ? '' : await res.text();
+    let data; try { data = JSON.parse(text); } catch { data = text || null; }
+    return { ok: res.ok, status: res.status, data: res.ok ? data : { error: `SCIM server returned ${res.status}`, details: data } };
+};
+
+// SCIM User resource for creating a local users row on a SCIM server
+const buildScimUserFromLocal = (u) => ({
+    schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
+    userName: u.login || u.email,
+    name: { givenName: u.first_name || '', familyName: u.last_name || '' },
+    emails: [{ value: u.email, type: 'work', primary: true }],
+    active: true,
+});
+
+// buildScimUserPatch prefilled from an existing SCIM user's current values (falls back to a local users row)
+const buildScimUserPatchFrom = (scimUser, local = {}) => buildScimUserPatch({
+    givenName:  scimUser.name?.givenName || local.first_name,
+    familyName: scimUser.name?.familyName || local.last_name,
+    email:      scimUser.emails?.find(e => e.primary)?.value || scimUser.emails?.[0]?.value || local.email,
+    address:    scimUser.addresses?.find(a => a.primary) || scimUser.addresses?.[0] || SAMPLE_ADDRESS,
+});
+
+const getScimDefaultPayload =(resourceType, action) => {
     const ts = Date.now();
     const defaults = {
         Users: {

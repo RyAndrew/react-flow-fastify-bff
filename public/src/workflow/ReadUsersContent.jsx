@@ -1,11 +1,4 @@
-// Actions offered for the selected user; each opens that step's modal with the user preselected
-const READ_USER_ACTIONS = [
-    { modal: 'update',    label: 'Update',              color: 'primary' },
-    { modal: 'lifecycle', label: 'Lifecycle',           color: 'warning' },
-    { modal: 'delete',    label: 'Deactivate / Delete', color: 'danger' },
-];
-
-const ReadUsersContent = ({ onClose, onOpenModal }) => {
+const ReadUsersContent = ({ onClose, onOpenModal, onShowUser }) => {
     const [users, setUsers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
     const [selectedId, setSelectedId] = React.useState('');
@@ -28,21 +21,11 @@ const ReadUsersContent = ({ onClose, onOpenModal }) => {
                             <span className="small fw-bold text-nowrap">{selectedUser.first_name} {selectedUser.last_name}</span>
                             <span className="small text-muted text-truncate">{selectedUser.email}</span>
                             <div className="ms-auto d-flex gap-2">
-                                {/* SCIM import not yet in Okta: offer Create, prefilled from the import */}
-                                {selectedUser.source === 'scim' && !selectedUser.okta_id && (
-                                    <button className="btn btn-success btn-sm text-nowrap"
-                                        onClick={() => onOpenModal('create', { initialImportedId: selectedUser.id })}>
-                                        Create
-                                    </button>
-                                )}
-                                {READ_USER_ACTIONS.map(({ modal, label, color }) => (
-                                    <button key={modal} className={`btn btn-${color} btn-sm text-nowrap`}
-                                        disabled={!selectedUser.okta_id}
-                                        title={selectedUser.okta_id ? '' : 'Not in Okta yet — create it from the Create User node'}
-                                        onClick={() => onOpenModal(modal, { initialUserId: selectedUser.okta_id })}>
-                                        {label}
-                                    </button>
-                                ))}
+                                <button className="btn btn-outline-dark btn-sm text-nowrap" title="Add this user as a node on the canvas"
+                                    onClick={() => { onShowUser(selectedUser); onClose(); }}>
+                                    Show
+                                </button>
+                                <UserActionButtons user={selectedUser} onOpenModal={onOpenModal} />
                             </div>
                         </>
                     ) : (

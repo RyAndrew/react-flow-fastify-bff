@@ -9,6 +9,14 @@ const apiPost = (url, body) => api(url, {
     body: JSON.stringify(body),
 });
 
+// Nested object → [['profile.firstName', 'Jane'], ['emails.0.value', 'j@x.com'], ...]; arrays of primitives are joined
+const flattenObject = (obj, prefix = '') => Object.entries(obj || {}).flatMap(([k, v]) => {
+    const key = prefix ? `${prefix}.${k}` : k;
+    const primitiveArray = Array.isArray(v) && v.every(x => x === null || typeof x !== 'object');
+    if (v && typeof v === 'object' && !primitiveArray) return flattenObject(v, key);
+    return [[key, primitiveArray ? v.join(', ') : v]];
+});
+
 const fmtJson =(v) => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); } catch { return String(v); } };
 
 const generatePassword = (length = 16) => {

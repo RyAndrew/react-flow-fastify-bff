@@ -93,6 +93,28 @@ export default async function userRoutes(fastify) {
       : 0;
     if (!linked) await db('users').insert(row);
 
+    const localUser = await db('users').where({ okta_id: data.id }).first();
+    return { ok: true, user: data, localUser };
+  });
+
+  // GET /local/:id — one row from the local users table
+  fastify.get('/local/:id', async (request, reply) => {
+    const user = await db('users').where({ id: request.params.id }).first();
+    if (!user) return reply.status(404).send({ error: `Local user ${request.params.id} not found` });
+    return { ok: true, user };
+  });
+
+  // GET /:oktaId — full user object from Okta
+  fastify.get('/:oktaId', async (request, reply) => {
+    const { oktaId } = request.params;
+    const url = `${downstreamApiUrl}/api/v1/users/${encodeURIComponent(oktaId)}`;
+    const { response, data } = await callDownstream(request, 'GET', url, null);
+
+    if (!response.ok) {
+      fastify.log.error({ status: response.status, data }, 'Get user failed');
+      return reply.status(response.status).send({ error: 'Downstream API error', details: data });
+    }
+
     return { ok: true, user: data };
   });
 

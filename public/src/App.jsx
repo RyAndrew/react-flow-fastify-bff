@@ -26,10 +26,16 @@ const App = () => {
         openModal(NODE_TO_LOGS[nodeId] || 'logs_create');
     }, [openModal]);
 
-    const handleScimNavigate = React.useCallback((nodeId) => {
-        setScimPreset(NODE_SCIM_PRESETS[nodeId] || null);
+    // Switch to the SCIM client with a preset ({ resourceType, action, requiresUser, scimId?, serverId?, patchOps? })
+    const openScim = React.useCallback((preset) => {
+        setModal(null);
+        setScimPreset(preset);
         setView('scim');
     }, []);
+
+    const handleScimNavigate = React.useCallback((nodeId) => {
+        openScim(NODE_SCIM_PRESETS[nodeId] || null);
+    }, [openScim]);
 
     const initialNodes = [
         { id: 'create',  type: 'custom', data: { label: '1. Create User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 50 },  className: 'create' },
@@ -44,6 +50,31 @@ const App = () => {
     const [edges, setEdges] = React.useState(initialEdges);
     const onNodesChange = React.useCallback((c) => setNodes(n => ReactFlow.applyNodeChanges(c, n)), []);
     const onEdgesChange = React.useCallback((c) => setEdges(e => ReactFlow.applyEdgeChanges(c, e)), []);
+    const flowRef = React.useRef(null);
+    // The canvas unmounts in the SCIM view; drop its instance so showUserNode doesn't fit a stale one
+    // (React Flow fits all nodes again when it remounts)
+    React.useEffect(() => { if (view !== 'workflow') flowRef.current = null; }, [view]);
+
+    const removeNode = React.useCallback((nodeId) => {
+        setNodes(ns => ns.filter(n => n.id !== nodeId));
+    }, []);
+
+    // Adds a floating user node left of the workflow (or refreshes and selects it if already shown).
+    // `user` is a row from the local users table.
+    const showUserNode = React.useCallback((user) => {
+        const id = `user-${user.id}`;
+        setNodes(ns => {
+            const data = { user, onOpenModal: openModal, onRemove: removeNode };
+            if (ns.some(n => n.id === id)) {
+                return ns.map(n => n.id === id ? { ...n, data, selected: true } : { ...n, selected: false });
+            }
+            const userNodeCount = ns.filter(n => n.type === 'user').length;
+            const node = { id, type: 'user', data, position: { x: -150, y: 50 + userNodeCount * 110 }, className: 'user', selected: true };
+            return [...ns.map(n => ({ ...n, selected: false })), node];
+        });
+        // Bring the new node into view once React Flow has measured it
+        setTimeout(() => flowRef.current?.fitView({ padding: 0.2, duration: 300 }), 50);
+    }, [openModal, removeNode]);
 
     if (isLoading) return <LoadingScreen />;
 
@@ -68,7 +99,7 @@ const App = () => {
             </nav>
             {view === 'workflow' ? (
                 <div style={{ height: 'calc(100vh - 56px)' }}>
-                    <ReactFlow.ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView>
+                    <ReactFlow.ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} onInit={i => { flowRef.current = i; }} fitView>
                         <ReactFlow.Controls />
                         <ReactFlow.Background variant="dots" gap={12} size={1} />
                     </ReactFlow.ReactFlow>
@@ -79,11 +110,13 @@ const App = () => {
                     onClearPreset={() => setScimPreset(null)}
                     serverId={selectedScimServerId}
                     onServerIdChange={setSelectedScimServerId}
+                    onShowUser={showUserNode}
+                    onGoToCanvas={() => setView('workflow')}
                 />
             )}
             {cfg && (
                 <Modal show={true} onClose={closeModal} title={cfg.title} size={cfg.size}>
-                    <cfg.Content onClose={closeModal} onOpenModal={openModal} onScimNavigate={handleScimNavigate} {...cfg.props} {...modal.props} />
+                    <cfg.Content onClose={closeModal} onOpenModal={openModal} onScimNavigate={handleScimNavigate} onOpenScim={openScim} onShowUser={showUserNode} {...cfg.props} {...modal.props} />
                 </Modal>
             )}
             {showExpiry && <SessionExpiryDialog countdown={countdown} onRefresh={refresh} onLogout={logout} />}

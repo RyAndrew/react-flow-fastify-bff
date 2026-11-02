@@ -1,6 +1,6 @@
 // Loaded after the component files: these tables reference components at load time.
 
-const nodeTypes = { custom: CustomNode };
+const nodeTypes = { custom: CustomNode, user: UserNode };
 
 const initialEdges = [
     { id: 'e-create-read',    source: 'create',  target: 'read',    markerEnd: { type: ReactFlow.MarkerType.ArrowClosed } },
@@ -18,6 +18,8 @@ const MODAL_CONFIG = {
     update:         { title: 'Update User',               size: 'modal-lg', Content: UpdateUserContent },
     lifecycle:      { title: 'User Lifecycle',            size: 'modal-lg', Content: LifecycleContent },
     delete:         { title: 'Deactivate / Delete User',  size: '',         Content: DeleteContent },
+    view_user:      { title: 'User Details',              size: 'modal-xl', Content: ViewUserContent },
+    scim_user:      { title: 'SCIM Operations',           size: 'modal-lg', Content: ScimUserContent },
     logs_create:    { title: 'Logs: Create User',         size: 'modal-xl', Content: LogsContent, props: { urlFilter: 'users/create' } },
     logs_import:    { title: 'Logs: Import User',         size: 'modal-xl', Content: LogsContent, props: { urlFilter: '/okta/search,/import' } },
     logs_read:      { title: 'Logs: Users',              size: 'modal-xl', Content: LogsContent, props: { urlFilter: '/api/v1/users' } },
