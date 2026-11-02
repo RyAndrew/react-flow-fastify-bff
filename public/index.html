@@ -58,10 +58,41 @@
         // ─── SCIM Client Constants ─────────────────────────────────────────
 
         const SCIM_RESOURCE_TYPES = ['Users', 'Groups'];
-        const SCIM_ACTIONS = ['list', 'get', 'create', 'replace', 'patch', 'delete'];
-        const SCIM_ACTION_LABELS  = { list: 'List', get: 'Get', create: 'Create', replace: 'Replace', patch: 'Patch', delete: 'Delete' };
-        const SCIM_ACTION_METHODS = { list: 'GET', get: 'GET', create: 'POST', replace: 'PUT', patch: 'PATCH', delete: 'DELETE' };
-        const SCIM_ACTION_COLORS  = { list: 'primary', get: 'info', create: 'success', replace: 'warning', patch: 'secondary', delete: 'danger' };
+        const SCIM_ACTIONS = ['list', 'get', 'create', 'replace', 'patch', 'setPassword', 'delete'];
+        const SCIM_USER_ONLY_ACTIONS = ['setPassword'];
+        const SCIM_ACTION_LABELS  = { list: 'List', get: 'Get', create: 'Create', replace: 'Replace', patch: 'Patch', setPassword: 'Set Password', delete: 'Delete' };
+        const SCIM_ACTION_METHODS = { list: 'GET', get: 'GET', create: 'POST', replace: 'PUT', patch: 'PATCH', setPassword: 'PATCH', delete: 'DELETE' };
+        const SCIM_ACTION_COLORS  = { list: 'primary', get: 'info', create: 'success', replace: 'warning', patch: 'secondary', setPassword: 'dark', delete: 'danger' };
+
+        // Okta-style SCIM password PatchOp: value object, no path
+        const buildScimPasswordPatch = (password) => ({
+            schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'],
+            Operations: [{ op: 'replace', value: { password } }],
+        });
+
+        const generatePassword = (length = 16) => {
+            const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '!@#$%^&*-_=+'];
+            const all = sets.join('');
+            const rand = (n) => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+            // One char from each set guarantees complexity rules, rest random, then shuffle
+            const chars = sets.map(s => s[rand(s.length)]);
+            while (chars.length < length) chars.push(all[rand(all.length)]);
+            for (let i = chars.length - 1; i > 0; i--) { const j = rand(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]]; }
+            return chars.join('');
+        };
+
+        const SAMPLE_ADDRESS = { type: 'work', streetAddress: '100 Main St', locality: 'San Francisco', region: 'CA', postalCode: '94105', country: 'US', primary: true };
+
+        // PatchOp that updates first/last name, work email and address
+        const buildScimUserPatch = ({ givenName, familyName, email, address }) => ({
+            schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'],
+            Operations: [
+                { op: 'replace', path: 'name.givenName', value: givenName },
+                { op: 'replace', path: 'name.familyName', value: familyName },
+                { op: 'replace', path: 'emails', value: [{ value: email, type: 'work', primary: true }] },
+                { op: 'replace', path: 'addresses', value: [address] },
+            ],
+        });
 
         const getScimDefaultPayload = (resourceType, action) => {
             const ts = Date.now();
@@ -69,7 +100,7 @@
                 Users: {
                     create:  { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: `user.${ts}@example.com`, name: { givenName: 'Test', familyName: 'User' }, emails: [{ value: `user.${ts}@example.com`, type: 'work', primary: true }], active: true },
                     replace: { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: 'testuser@example.com', name: { givenName: 'Updated', familyName: 'User' }, emails: [{ value: 'testuser@example.com', type: 'work', primary: true }], active: true },
-                    patch:   { schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'], Operations: [{ op: 'replace', path: 'active', value: false }] },
+                    patch:   buildScimUserPatch({ givenName: 'Updated', familyName: 'User', email: `updated.${ts}@example.com`, address: SAMPLE_ADDRESS }),
                 },
                 Groups: {
                     create:  { schemas: ['urn:ietf:params:scim:schemas:core:2.0:Group'], displayName: `Test Group ${ts}`, members: [] },
@@ -1135,7 +1166,13 @@
             const [lookupError, setLookupError] = useState(null);
             const [presetActive, setPresetActive] = useState(false); // true while a preset is in effect
 
-            const needsId      = ['get', 'replace', 'patch', 'delete'].includes(action);
+            // Set Password state
+            const [newPassword, setNewPassword] = useState('');
+            const [confirmPassword, setConfirmPassword] = useState('');
+            const [showPassword, setShowPassword] = useState(false);
+
+            const isSetPassword = action === 'setPassword';
+            const needsId      = ['get', 'replace', 'patch', 'setPassword', 'delete'].includes(action);
             const needsPayload = ['create', 'replace', 'patch'].includes(action);
             const needsFilter  = action === 'list';
             const method       = SCIM_ACTION_METHODS[action];
@@ -1188,6 +1225,7 @@
             useEffect(() => {
                 if (presetActive) return; // preset just applied, skip
                 setResponse(null); setError(null); setHttpStatus(null);
+                clearPasswordFields();
                 setPayload(needsPayload ? getScimDefaultPayload(resourceType, action) : '');
             }, [action, resourceType]);
 
@@ -1210,15 +1248,14 @@
                 const scimUser = ok && data.Resources?.[0];
                 if (scimUser) {
                     setIdInput(scimUser.id);
-                    // For generic patch (no patchOps), build a name patch from SCIM user data
-                    if (action === 'patch' && !payload.includes('active')) {
-                        setPayload(JSON.stringify({
-                            schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'],
-                            Operations: [
-                                { op: 'replace', path: 'name.givenName', value: scimUser.name?.givenName || user.first_name },
-                                { op: 'replace', path: 'name.familyName', value: scimUser.name?.familyName || user.last_name },
-                            ],
-                        }, null, 2));
+                    // For generic patch (no patchOps), build an update patch from SCIM user data
+                    if (action === 'patch' && !payload.includes('"active"')) {
+                        setPayload(JSON.stringify(buildScimUserPatch({
+                            givenName:  scimUser.name?.givenName || user.first_name,
+                            familyName: scimUser.name?.familyName || user.last_name,
+                            email:      scimUser.emails?.find(e => e.primary)?.value || scimUser.emails?.[0]?.value || user.email,
+                            address:    scimUser.addresses?.find(a => a.primary) || scimUser.addresses?.[0] || SAMPLE_ADDRESS,
+                        }), null, 2));
                     }
                 } else {
                     setLookupError(`No SCIM user found matching "${user.email}" on selected server`);
@@ -1241,10 +1278,16 @@
             const handleExecute = async () => {
                 if (!serverId) { setError('Please select a SCIM server'); return; }
                 if (needsId && !idInput.trim()) { setError('Please enter a resource ID'); return; }
+                if (isSetPassword) {
+                    if (!newPassword) { setError('Please enter a new password'); return; }
+                    if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
+                }
                 setLoading(true); setResponse(null); setError(null); setHttpStatus(null);
 
                 let body = null;
-                if (needsPayload) {
+                if (isSetPassword) {
+                    body = buildScimPasswordPatch(newPassword);
+                } else if (needsPayload) {
                     try { body = JSON.parse(payload); }
                     catch { setError('Invalid JSON payload'); setLoading(false); return; }
                 }
@@ -1263,9 +1306,14 @@
                 try {
                     const res = await fetch(url, opts);
                     setHttpStatus(res.status);
-                    if (res.status === 204) { setResponse({ message: '204 No Content — resource deleted' }); setLoading(false); return; }
+                    if (res.status === 204) {
+                        setResponse({ message: isSetPassword ? '204 No Content — password updated' : '204 No Content — resource deleted' });
+                        if (isSetPassword) clearPasswordFields();
+                        setLoading(false); return;
+                    }
                     const text = await res.text();
                     let data; try { data = JSON.parse(text); } catch { data = text || null; }
+                    if (res.ok && isSetPassword) clearPasswordFields();
                     if (res.ok) setResponse(data);
                     else setError(typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data));
                 } catch (e) {
@@ -1275,6 +1323,13 @@
             };
 
             const resetResult = () => { setResponse(null); setError(null); setHttpStatus(null); };
+
+            function clearPasswordFields() { setNewPassword(''); setConfirmPassword(''); setShowPassword(false); }
+
+            const handleGeneratePassword = () => {
+                const pw = generatePassword();
+                setNewPassword(pw); setConfirmPassword(pw); setShowPassword(true);
+            };
 
             const changeAction = (a) => {
                 setAction(a); resetResult();
@@ -1361,7 +1416,7 @@
 
                                         {/* Action buttons */}
                                         <div className="mb-3 d-flex flex-wrap gap-2">
-                                            {SCIM_ACTIONS.map(a => (
+                                            {SCIM_ACTIONS.filter(a => resourceType === 'Users' || !SCIM_USER_ONLY_ACTIONS.includes(a)).map(a => (
                                                 <button key={a}
                                                     className={`btn btn-sm ${action === a ? `btn-${SCIM_ACTION_COLORS[a]}` : `btn-outline-${SCIM_ACTION_COLORS[a]}`}`}
                                                     onClick={() => changeAction(a)}>
@@ -1451,6 +1506,35 @@
                                                 <label className="form-label small fw-bold">Request Body:</label>
                                                 <textarea className="form-control font-monospace" rows={10} style={{ fontSize: '0.8rem' }}
                                                     value={payload} onChange={e => setPayload(e.target.value)} />
+                                            </div>
+                                        )}
+
+                                        {/* Set Password inputs (body is built from these, never shown in plaintext) */}
+                                        {isSetPassword && (
+                                            <div className="mb-3">
+                                                <label className="form-label small fw-bold">New Password:</label>
+                                                <div className="input-group input-group-sm mb-2">
+                                                    <input type={showPassword ? 'text' : 'password'} className="form-control font-monospace"
+                                                        autoComplete="new-password"
+                                                        value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                                                    <button className="btn btn-outline-secondary" type="button" onClick={() => setShowPassword(s => !s)}>
+                                                        {showPassword ? 'Hide' : 'Show'}
+                                                    </button>
+                                                    <button className="btn btn-outline-secondary" type="button" onClick={handleGeneratePassword}>
+                                                        Generate
+                                                    </button>
+                                                </div>
+                                                <label className="form-label small fw-bold">Confirm Password:</label>
+                                                <input type={showPassword ? 'text' : 'password'} className="form-control form-control-sm font-monospace mb-1"
+                                                    autoComplete="new-password"
+                                                    value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+                                                {confirmPassword && newPassword !== confirmPassword && (
+                                                    <div className="text-warning small mb-1">⚠ Passwords do not match</div>
+                                                )}
+                                                <label className="form-label small fw-bold mt-2">Request Body <span className="text-muted fw-normal">(preview, password masked)</span>:</label>
+                                                <pre className="json-pre mb-0" style={{ fontSize: '0.8rem' }}>
+                                                    {fmtJson(buildScimPasswordPatch(newPassword ? '••••••••' : ''))}
+                                                </pre>
                                             </div>
                                         )}
 

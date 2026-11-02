@@ -1,4 +1,5 @@
 import fp from 'fastify-plugin';
+import { redactSecrets } from '../lib/redact.js';
 
 function calculateDurationMs(startTime) {
   if (!startTime) return null;
@@ -10,7 +11,7 @@ function buildLogRecord(request, reply, durationMs) {
   let requestBody = null;
   if (hasMutatingBody && request.body) {
     try {
-      requestBody = JSON.stringify(request.body);
+      requestBody = JSON.stringify(redactSecrets(request.body));
     } catch {
       requestBody = '[unparseable]';
     }
