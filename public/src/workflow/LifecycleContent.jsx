@@ -1,7 +1,7 @@
-const LifecycleContent = ({ onClose }) => {
+const LifecycleContent = ({ onClose, initialUserId }) => {
     const [users, setUsers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
-    const [selectedId, setSelectedId] = React.useState('');
+    const [selectedId, setSelectedId] = React.useState(initialUserId || '');
     const [running, setRunning] = React.useState(null);
     const [result, setResult] = React.useState(null);
     const [error, setError] = React.useState(null);

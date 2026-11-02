@@ -1,4 +1,15 @@
-const fmtJson = (v) => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); } catch { return String(v); } };
+const api = (url, opts = {}) => fetch(url, { credentials: 'same-origin', ...opts }).then(async r => {
+    const data = await r.json();
+    return { ok: r.ok, status: r.status, data };
+});
+
+const apiPost = (url, body) => api(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+});
+
+const fmtJson =(v) => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); } catch { return String(v); } };
 
 const generatePassword = (length = 16) => {
     const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '!@#$%^&*-_=+'];

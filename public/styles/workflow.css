@@ -1,5 +1,6 @@
 .react-flow__node { padding: 10px; border-radius: 8px; border: 2px solid #ddd; background: white; font-weight: 500; }
 .react-flow__node.create { border-color: #28a745; background: #d4edda; }
+.react-flow__node.read { border-color: #0dcaf0; background: #cff4fc; }
 .react-flow__node.update { border-color: #007bff; background: #cfe2ff; }
 .react-flow__node.suspend { border-color: #ffc107; background: #fff3cd; }
 .react-flow__node.delete { border-color: #dc3545; background: #f8d7da; }

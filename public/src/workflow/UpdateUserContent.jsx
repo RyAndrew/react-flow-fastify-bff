@@ -5,10 +5,10 @@ const UPDATE_TASKS = [
     { key: 'group', label: 'Add to Group' },
 ];
 
-const UpdateUserContent = ({ onClose }) => {
+const UpdateUserContent = ({ onClose, initialUserId }) => {
     const [users, setUsers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
-    const [selectedId, setSelectedId] = React.useState('');
+    const [selectedId, setSelectedId] = React.useState(initialUserId || '');
     const [activeTask, setActiveTask] = React.useState('profile');
 
     React.useEffect(() => {

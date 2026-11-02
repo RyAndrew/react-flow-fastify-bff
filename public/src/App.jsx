@@ -1,7 +1,7 @@
 const App = () => {
-    const { isAuthenticated, isLoading, user, logout, refresh, loginRedirect, showExpiry, loggedOut, countdown } = useAuth();
+    const { isAuthenticated, isLoading, user, logout, refresh, login, showExpiry, loggedOut, countdown } = useAuth();
     const [view, setView] = React.useState('workflow'); // 'workflow' | 'scim'
-    const [modalType, setModalType] = React.useState(null);
+    const [modal, setModal] = React.useState(null); // { type, props }
     const [scimPreset, setScimPreset] = React.useState(null);
     const [selectedScimServerId, setSelectedScimServerId] = React.useState('');
     const [authError] = React.useState(() => {
@@ -11,15 +11,20 @@ const App = () => {
         return err || null;
     });
 
-    const closeModal = React.useCallback(() => setModalType(null), []);
+    const closeModal = React.useCallback(() => setModal(null), []);
+
+    // props are passed through to the modal's Content (e.g. { initialUserId })
+    const openModal = React.useCallback((type, props) => {
+        setModal(type ? { type, props } : null);
+    }, []);
 
     const handleRun = React.useCallback((nodeId) => {
-        setModalType(NODE_TO_MODAL[nodeId] || null);
-    }, []);
+        openModal(NODE_TO_MODAL[nodeId]);
+    }, [openModal]);
 
     const handleViewLogs = React.useCallback((nodeId) => {
-        setModalType(NODE_TO_LOGS[nodeId] || 'logs_create');
-    }, []);
+        openModal(NODE_TO_LOGS[nodeId] || 'logs_create');
+    }, [openModal]);
 
     const handleScimNavigate = React.useCallback((nodeId) => {
         setScimPreset(NODE_SCIM_PRESETS[nodeId] || null);
@@ -27,10 +32,11 @@ const App = () => {
     }, []);
 
     const initialNodes = [
-        { id: '1', type: 'custom', data: { label: '1. Create User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 50 },  className: 'create' },
-        { id: '2', type: 'custom', data: { label: '2. Update User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 150 }, className: 'update' },
-        { id: '3', type: 'custom', data: { label: '3. Suspend User', onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 250 }, className: 'suspend' },
-        { id: '4', type: 'custom', data: { label: '4. Delete User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 350 }, className: 'delete' },
+        { id: 'create',  type: 'custom', data: { label: '1. Create User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 50 },  className: 'create' },
+        { id: 'read',    type: 'custom', data: { label: '2. Read Users',   onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 150 }, className: 'read' },
+        { id: 'update',  type: 'custom', data: { label: '3. Update User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 250 }, className: 'update' },
+        { id: 'suspend', type: 'custom', data: { label: '4. Suspend User', onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 350 }, className: 'suspend' },
+        { id: 'delete',  type: 'custom', data: { label: '5. Delete User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 450 }, className: 'delete' },
     ];
 
     const [nodes, setNodes] = React.useState(initialNodes);
@@ -44,7 +50,7 @@ const App = () => {
 
     if (loggedOut || !isAuthenticated) return <SessionExpiredScreen onLogin={login} />;
 
-    const cfg = modalType ? MODAL_CONFIG[modalType] : null;
+    const cfg = modal ? MODAL_CONFIG[modal.type] : null;
 
     return (
         <div className="container-fluid h-100 p-0">
@@ -76,7 +82,7 @@ const App = () => {
             )}
             {cfg && (
                 <Modal show={true} onClose={closeModal} title={cfg.title} size={cfg.size}>
-                    <cfg.Content onClose={closeModal} {...cfg.props} />
+                    <cfg.Content onClose={closeModal} onOpenModal={openModal} {...cfg.props} {...modal.props} />
                 </Modal>
             )}
             {showExpiry && <SessionExpiryDialog countdown={countdown} onRefresh={refresh} onLogout={logout} />}
