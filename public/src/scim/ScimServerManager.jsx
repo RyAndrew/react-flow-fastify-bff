@@ -43,7 +43,7 @@ const ScimServerManager = ({ onClose, onChanged }) => {
             loadServers();
             onChanged();
         } else {
-            setError(data?.error || 'Save failed');
+            setError(data || 'Save failed');
         }
     };
 
@@ -90,7 +90,7 @@ const ScimServerManager = ({ onClose, onChanged }) => {
                 )}
 
                 <h6 className="fw-bold border-top pt-3">{editingId ? 'Edit Server' : 'Add Server'}</h6>
-                {error && <div className="alert alert-danger py-2 small">{error}</div>}
+                {error && <div className="mb-2"><ApiError data={error} /></div>}
                 <div className="row g-2">
                     <div className="col-md-6">
                         <label className="form-label small">Name</label>

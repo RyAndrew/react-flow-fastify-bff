@@ -64,7 +64,7 @@ const AddToGroupContent = ({ userId }) => {
         setStatus('running'); setError(null);
         const { ok, data } = await api(`/api/v1/users/${userId}/groups/${selectedGroup.id}`, { method: 'PUT' });
         if (ok) { setStatus('done'); setResult({ groupId: selectedGroup.id, groupName: selectedGroup.profile?.name }); }
-        else { setStatus('error'); setError(data.details?.errorSummary || data.error || 'Failed to add user to group'); }
+        else { setStatus('error'); setError(data); }
     };
 
     const reset = () => {
@@ -119,7 +119,7 @@ const AddToGroupContent = ({ userId }) => {
                         url: `/api/v1/groups/${selectedGroup.id}/users/${userId}`,
                         group: { id: selectedGroup.id, name: selectedGroup.profile?.name, type: selectedGroup.type },
                     })}</pre>
-                    {error && <p className="text-danger small mb-1">{error}</p>}
+                    {error && <ApiError data={error} />}
                     <button className="btn btn-primary btn-sm" onClick={handleAddToGroup}>Add to Group</button>
                 </div>
             )}
@@ -133,7 +133,7 @@ const AddToGroupContent = ({ userId }) => {
             )}
             {status === 'error' && (
                 <div>
-                    <p className="text-danger small mb-1">&#10007; {error}</p>
+                    <ApiError data={error} />
                     <button className="btn btn-outline-secondary btn-sm" onClick={reset}>Try Again</button>
                 </div>
             )}

@@ -22,7 +22,7 @@ const EnrollFactorContent = ({ userId }) => {
             if (ok) {
                 setCatalog(data.factors || []);
             } else {
-                setCatalogError(data.details?.errorSummary || data.error || 'Failed to load factor catalog');
+                setCatalogError(data);
             }
             setCatalogLoading(false);
         });
@@ -44,13 +44,13 @@ const EnrollFactorContent = ({ userId }) => {
         setStatus('running'); setError(null);
         const { ok, data } = await apiPost(`/api/v1/users/${userId}/factors`, parsed);
         if (ok) { setStatus('done'); setResult(data); }
-        else { setStatus('error'); setError(data.details?.errorSummary || data.error || 'Enrollment failed'); }
+        else { setStatus('error'); setError(data); }
     };
 
     const reset = () => { setStatus('idle'); setResult(null); setError(null); };
 
     if (catalogLoading) return <div className="text-center py-3"><div className="spinner-border spinner-border-sm text-info" /></div>;
-    if (catalogError) return <div className="alert alert-danger small">{catalogError}</div>;
+    if (catalogError) return <ApiError data={catalogError} />;
     if (!catalog.length) return <div className="alert alert-info small mb-0">No enrollable factors available for this user.</div>;
 
     return (
@@ -73,7 +73,7 @@ const EnrollFactorContent = ({ userId }) => {
                     <label className="form-label small fw-bold">Payload (edit before sending):</label>
                     <textarea className="form-control font-monospace mb-2" rows={6} style={{ fontSize: '0.8rem' }}
                         value={payload} onChange={e => setPayload(e.target.value)} />
-                    {error && <p className="text-danger small mb-1">{error}</p>}
+                    {error && <ApiError data={error} />}
                     <button className="btn btn-info btn-sm" onClick={handleEnroll}>Enroll Factor</button>
                 </div>
             )}
@@ -87,7 +87,7 @@ const EnrollFactorContent = ({ userId }) => {
             )}
             {status === 'error' && (
                 <div>
-                    <p className="text-danger small mb-1">&#10007; {error}</p>
+                    <ApiError data={error} />
                     <button className="btn btn-outline-secondary btn-sm" onClick={reset}>Try Again</button>
                 </div>
             )}

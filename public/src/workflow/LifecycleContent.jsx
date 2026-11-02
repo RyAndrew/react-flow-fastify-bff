@@ -23,7 +23,7 @@ const LifecycleContent = ({ onClose, initialUserId }) => {
             setResult({ action, user: data.user });
             loadUsers();
         } else {
-            setError(data.details?.errorSummary || data.error || `${action} failed`);
+            setError(data);
         }
     };
 
@@ -47,7 +47,7 @@ const LifecycleContent = ({ onClose, initialUserId }) => {
                         <pre className="json-pre">{fmtJson(result.user)}</pre>
                     </div>
                 )}
-                {error && <p className="text-danger">&#10007; {error}</p>}
+                {error && <ApiError data={error} />}
             </div>
             <div className="modal-footer">
                 <button className="btn btn-secondary" onClick={onClose}>Close</button>

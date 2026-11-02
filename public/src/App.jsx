@@ -33,7 +33,8 @@ const App = () => {
 
     const initialNodes = [
         { id: 'create',  type: 'custom', data: { label: '1. Create User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 50 },  className: 'create' },
-        { id: 'read',    type: 'custom', data: { label: '2. Read Users',   onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 150 }, className: 'read' },
+        { id: 'import',  type: 'custom', data: { label: 'Import User',     onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 500, y: 50 },  className: 'import' },
+        { id: 'read',   type: 'custom', data: { label: '2. Read Users',   onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 150 }, className: 'read' },
         { id: 'update',  type: 'custom', data: { label: '3. Update User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 250 }, className: 'update' },
         { id: 'suspend', type: 'custom', data: { label: '4. Suspend User', onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 350 }, className: 'suspend' },
         { id: 'delete',  type: 'custom', data: { label: '5. Delete User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 450 }, className: 'delete' },
@@ -82,7 +83,7 @@ const App = () => {
             )}
             {cfg && (
                 <Modal show={true} onClose={closeModal} title={cfg.title} size={cfg.size}>
-                    <cfg.Content onClose={closeModal} onOpenModal={openModal} {...cfg.props} {...modal.props} />
+                    <cfg.Content onClose={closeModal} onOpenModal={openModal} onScimNavigate={handleScimNavigate} {...cfg.props} {...modal.props} />
                 </Modal>
             )}
             {showExpiry && <SessionExpiryDialog countdown={countdown} onRefresh={refresh} onLogout={logout} />}

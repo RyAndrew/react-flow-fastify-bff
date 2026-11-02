@@ -8,12 +8,62 @@ export default async function userRoutes(fastify) {
   fastify.addHook('preHandler', requireAccessToken);
 
   // GET / — list users from local DB
-  fastify.get('/', async () => {
-    const users = await db('users').select('*').orderBy('created_at', 'desc');
+  // Default: only users linked to Okta (have an okta_id).
+  // ?source=created|okta|scim — filter by how the user got into the DB
+  // ?scope=all — every row, including SCIM imports not yet created in Okta
+  fastify.get('/', async (request) => {
+    const { source, scope } = request.query;
+    let query = db('users').select('*').orderBy('created_at', 'desc');
+    if (source) query = query.where({ source });
+    else if (scope !== 'all') query = query.whereNotNull('okta_id');
+    const users = await query;
     return { users };
   });
 
+  // GET /okta/search — search Okta users
+  // ?mode=q|filter|search|lookup &value= &limit= &after=
+  //   q      — prefix match on firstName, lastName, email
+  //   filter — filter expression on a limited set of properties
+  //   search — search expression on any profile attribute
+  //   lookup — single user by Okta ID or login
+  fastify.get('/okta/search', async (request, reply) => {
+    const { mode = 'q', value = '', limit = '20', after } = request.query;
+    if (!['q', 'filter', 'search', 'lookup'].includes(mode)) {
+      return reply.status(400).send({ error: `Unknown search mode: ${mode}` });
+    }
+
+    if (mode === 'lookup') {
+      if (!value) return reply.status(400).send({ error: 'Lookup requires an Okta ID or login' });
+      const url = `${downstreamApiUrl}/api/v1/users/${encodeURIComponent(value)}`;
+      const { response, data } = await callDownstream(request, 'GET', url, null);
+      if (response.status === 404) return { ok: true, users: [], nextAfter: null };
+      if (!response.ok) {
+        fastify.log.error({ status: response.status, data }, 'Okta user lookup failed');
+        return reply.status(response.status).send({ error: 'Downstream API error', details: data });
+      }
+      return { ok: true, users: [data], nextAfter: null };
+    }
+
+    const qs = new URLSearchParams({ limit });
+    if (value) qs.set(mode, value);
+    if (after) qs.set('after', after);
+    const url = `${downstreamApiUrl}/api/v1/users?${qs}`;
+    const { response, data } = await callDownstream(request, 'GET', url, null);
+
+    if (!response.ok) {
+      fastify.log.error({ status: response.status, data }, 'Okta user search failed');
+      return reply.status(response.status).send({ error: 'Downstream API error', details: data });
+    }
+
+    // Okta paginates with a Link header: <...?after=cursor>; rel="next"
+    const next = (response.headers.get('link') || '').match(/<([^>]+)>;\s*rel="next"/)?.[1];
+    const nextAfter = next ? new URL(next).searchParams.get('after') : null;
+
+    return { ok: true, users: data, nextAfter };
+  });
+
   // POST /create — create user via downstream API + store locally
+  // ?importedId= — local row of a SCIM import to link to the new Okta user instead of inserting a new row
   fastify.post('/create', async (request, reply) => {
     const body = request.body;
     if (!body?.profile?.email) {
@@ -29,16 +79,49 @@ export default async function userRoutes(fastify) {
     }
 
     // Persist to local users table
-    await db('users').insert({
+    const row = {
       okta_id: data.id,
       email: data.profile?.email,
       first_name: data.profile?.firstName,
       last_name: data.profile?.lastName,
       login: data.profile?.login,
       status: data.status,
-    });
+    };
+    const { importedId } = request.query;
+    const linked = importedId
+      ? await db('users').where({ id: importedId }).whereNull('okta_id').update(row)
+      : 0;
+    if (!linked) await db('users').insert(row);
 
     return { ok: true, user: data };
+  });
+
+  // POST /:oktaId/import — fetch an Okta user and add (or refresh) it in the local DB
+  fastify.post('/:oktaId/import', async (request, reply) => {
+    const { oktaId } = request.params;
+
+    const url = `${downstreamApiUrl}/api/v1/users/${encodeURIComponent(oktaId)}`;
+    const { response, data } = await callDownstream(request, 'GET', url, null);
+
+    if (!response.ok) {
+      fastify.log.error({ status: response.status, data }, 'Import user failed');
+      return reply.status(response.status).send({ error: 'Downstream API error', details: data });
+    }
+
+    const profile = {
+      email: data.profile?.email,
+      first_name: data.profile?.firstName,
+      last_name: data.profile?.lastName,
+      login: data.profile?.login,
+      status: data.status,
+    };
+    await db('users')
+      .insert({ okta_id: data.id, source: 'okta', ...profile })
+      .onConflict('okta_id')
+      .merge(Object.keys(profile));
+
+    const user = await db('users').where({ okta_id: data.id }).first();
+    return { ok: true, user };
   });
 
   // POST /:oktaId/update — update user profile via downstream API

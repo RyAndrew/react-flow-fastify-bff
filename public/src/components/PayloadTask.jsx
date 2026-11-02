@@ -14,7 +14,7 @@ const PayloadTask = ({ url, method, buttonLabel, buttonColor, defaultPayload, on
         const fetchFn = method === 'POST' ? apiPost : (u, b) => api(u, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
         const { ok, data } = await fetchFn(url, parsed);
         if (ok) { setStatus('done'); setResult(data); if (onSuccess) onSuccess(data); }
-        else { setStatus('error'); setError(data.details?.errorSummary || data.error || 'Failed'); }
+        else { setStatus('error'); setError(data); }
     };
 
     const reset = () => { setStatus('idle'); setResult(null); setError(null); setPayload(defaultPayload); };
@@ -29,6 +29,7 @@ const PayloadTask = ({ url, method, buttonLabel, buttonColor, defaultPayload, on
                 <div>
                     <textarea className="form-control font-monospace mb-2" rows={6} style={{ fontSize: '0.8rem' }}
                         value={payload} onChange={e => setPayload(e.target.value)} />
+                    {error && <ApiError data={error} />}
                     <button className={`btn btn-${buttonColor} btn-sm`} onClick={handleSubmit}>{buttonLabel}</button>
                 </div>
             )}
@@ -42,8 +43,8 @@ const PayloadTask = ({ url, method, buttonLabel, buttonColor, defaultPayload, on
             )}
             {status === 'error' && (
                 <div>
-                    <p className="text-danger small mb-1">&#10007; {error}</p>
-                    <button className="btn btn-outline-secondary btn-sm" onClick={reset}>Try Again</button>
+                    <ApiError data={error} />
+                    <button className="btn btn-outline-secondary btn-sm" onClick={() => { setStatus('idle'); setError(null); }}>Edit &amp; Retry</button>
                 </div>
             )}
         </div>

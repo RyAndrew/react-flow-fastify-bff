@@ -18,7 +18,7 @@ const DeleteContent = ({ onClose, initialUserId }) => {
         const { ok, data } = await apiPost(`/api/v1/users/${selectedId}/deactivate`, {});
         setRunning(null);
         if (ok) { setResult({ action: 'deactivate', data }); loadUsers(); }
-        else { setError(data.details?.errorSummary || data.error || 'Deactivate failed'); }
+        else { setError(data); }
     };
 
     const handleDelete = async () => {
@@ -27,7 +27,7 @@ const DeleteContent = ({ onClose, initialUserId }) => {
         const { ok, data } = await api(`/api/v1/users/${selectedId}`, { method: 'DELETE' });
         setRunning(null);
         if (ok) { setResult({ action: 'delete', data }); setSelectedId(''); loadUsers(); }
-        else { setError(data.details?.errorSummary || data.error || 'Delete failed — user may need to be deactivated first'); }
+        else { setError(data); }
     };
 
     const selectedUser = users.find(u => u.okta_id === selectedId);
@@ -50,7 +50,7 @@ const DeleteContent = ({ onClose, initialUserId }) => {
                     <p className="small text-muted">Current status: <StatusBadge status={selectedUser.status} /></p>
                 )}
                 {result && <div className="text-success fw-bold">&#10003; {result.action} completed</div>}
-                {error && <p className="text-danger">&#10007; {error}</p>}
+                {error && <ApiError data={error} />}
             </div>
             <div className="modal-footer">
                 <button className="btn btn-secondary" onClick={onClose}>Close</button>

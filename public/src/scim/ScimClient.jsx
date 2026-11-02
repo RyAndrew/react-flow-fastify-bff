@@ -417,6 +417,7 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange }) => {
                                 {!loading && response !== null && (
                                     <div>
                                         <div className="text-success fw-bold small mb-1">&#10003; Success</div>
+                                        {resourceType === 'Users' && <ScimUserResults response={response} serverId={serverId} />}
                                         <pre className="json-pre" style={{ maxHeight: '65vh' }}>{fmtJson(response)}</pre>
                                     </div>
                                 )}
