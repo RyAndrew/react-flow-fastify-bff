@@ -1,0 +1,2 @@
+.log-table { font-size: 0.75rem; }
+.log-table td, .log-table th { white-space: nowrap; max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
