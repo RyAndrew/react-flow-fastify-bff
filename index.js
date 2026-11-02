@@ -50,8 +50,8 @@ await fastify.register(fastifyStatic, {
 await fastify.register(sessionPlugin, {
   secret: config.SESSION_SECRET,
   db,
-  secure: true,
-  //secure: config.APP_URL.startsWith('https'),
+  //secure: true,
+  secure: config.APP_URL.startsWith('https'),
 });
 
 // Request logger (persists every API request as one row in SQLite)

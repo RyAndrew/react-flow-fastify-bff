@@ -9,12 +9,12 @@ async function sessionPlugin(fastify, opts) {
   await fastify.register(session, {
     secret: opts.secret,
     store: new KnexSessionStore(opts.db),
-    cookieName: 'sid',
+    cookieName: 's',
     cookie: {
       httpOnly: true,
       secure: opts.secure,
       sameSite: 'lax',
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      maxAge: 30 * 24 * 60 * 60 * 1000, //30 days // 24 hours
     },
     saveUninitialized: false,
   });
