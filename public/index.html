@@ -13,7 +13,7 @@
 
     <link rel="stylesheet" href="styles/app.css">
     <link rel="stylesheet" href="styles/workflow.css">
-    <link rel="stylesheet" href="styles/LogViewer.css">
+    <link rel="stylesheet" href="styles/logs.css">
 </head>
 <body>
     <div id="root">
@@ -33,6 +33,7 @@
     <script src="lib/util.js"></script>
     <script src="lib/scim.js"></script>
     <script src="lib/okta.js"></script>
+    <script src="lib/logs.js"></script>
 
     <script type="text/babel" src="src/auth/SessionAuthProvider.jsx"></script>
     <script type="text/babel" src="src/auth/LoadingScreen.jsx"></script>
@@ -47,7 +48,6 @@
     <script type="text/babel" src="src/components/StatusBadge.jsx"></script>
     <script type="text/babel" src="src/components/UserPicker.jsx"></script>
     <script type="text/babel" src="src/components/PayloadTask.jsx"></script>
-    <script type="text/babel" src="src/components/LogViewer.jsx"></script>
 
     <script type="text/babel" src="src/workflow/CustomNode.jsx"></script>
     <script type="text/babel" src="src/workflow/UserNode.jsx"></script>
@@ -61,7 +61,11 @@
     <script type="text/babel" src="src/workflow/UpdateUserContent.jsx"></script>
     <script type="text/babel" src="src/workflow/LifecycleContent.jsx"></script>
     <script type="text/babel" src="src/workflow/DeleteContent.jsx"></script>
-    <script type="text/babel" src="src/workflow/LogsContent.jsx"></script>
+
+    <script type="text/babel" src="src/logs/AccessLogTable.jsx"></script>
+    <script type="text/babel" src="src/logs/OktaLogTable.jsx"></script>
+    <script type="text/babel" src="src/logs/LogFilters.jsx"></script>
+    <script type="text/babel" src="src/logs/LogsView.jsx"></script>
 
     <script type="text/babel" src="src/scim/ScimServerManager.jsx"></script>
     <script type="text/babel" src="src/scim/ScimPasswordFields.jsx"></script>

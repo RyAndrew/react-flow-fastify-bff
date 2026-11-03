@@ -1,4 +1,4 @@
-const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowUser, onGoToCanvas }) => {
+const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowUser, onGoToCanvas, onViewLogs }) => {
     const [servers, setServers] = React.useState([]);
     const [showServerMgr, setShowServerMgr] = React.useState(false);
     const [resourceType, setResourceType] = React.useState('Users');
@@ -12,8 +12,6 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
     const [response, setResponse] = React.useState(null);
     const [httpStatus, setHttpStatus] = React.useState(null);
     const [error, setError] = React.useState(null);
-    const [scimTab, setScimTab] = React.useState('client');
-    const [logKey, setLogKey] = React.useState(0);
     const [canvasNotice, setCanvasNotice] = React.useState(null); // after a SCIM create: 'running' | 'done' | error response
 
     // Workflow user picker state (used when preset.requiresUser)
@@ -49,7 +47,6 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
     // Apply preset from workflow navigation
     React.useEffect(() => {
         if (!preset) return;
-        setScimTab('client');
         setResourceType(preset.resourceType || 'Users');
         setAction(preset.action);
         // Presets from a user node / Read Users target one known SCIM user on a known server
@@ -227,213 +224,192 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
                 />
             )}
             <div className="container-fluid p-3">
-                {/* Top tabs */}
-                <ul className="nav nav-tabs mb-3">
-                    <li className="nav-item">
-                        <button className={`nav-link ${scimTab === 'client' ? 'active' : ''}`} onClick={() => setScimTab('client')}>SCIM Client</button>
-                    </li>
-                    <li className="nav-item">
-                        <button className={`nav-link ${scimTab === 'logs' ? 'active' : ''}`}
-                            onClick={() => { setScimTab('logs'); setLogKey(k => k + 1); }}>Logs</button>
-                    </li>
-                </ul>
+                {/* ── Server selector bar ── */}
+                <div className="d-flex align-items-center gap-2 mb-3 p-2 bg-light border rounded">
+                    <label className="form-label mb-0 small fw-bold text-nowrap">SCIM Server:</label>
+                    <select className="form-select form-select-sm"
+                        value={serverId || ''}
+                        onChange={e => onServerIdChange(e.target.value)}>
+                        <option value="">— select a server —</option>
+                        {servers.map(s => (
+                            <option key={s.id} value={s.id}>{s.name} — {s.url}</option>
+                        ))}
+                    </select>
+                    <button className="btn btn-outline-secondary btn-sm text-nowrap" onClick={() => setShowServerMgr(true)}>
+                        Manage Servers
+                    </button>
+                    {/* Downstream URLs start with the server URL, so a text filter on it narrows to this server */}
+                    <button className="btn btn-outline-primary btn-sm text-nowrap"
+                        onClick={() => onViewLogs(selectedServer ? { label: `SCIM server ${selectedServer.name}`, filters: { scim: { q: selectedServer.url } } } : null)}>
+                        📄 View Logs
+                    </button>
+                </div>
 
-                {scimTab === 'logs' && (
-                    <div>
-                        <div className="d-flex justify-content-end mb-2">
-                            <button className="btn btn-outline-secondary btn-sm" onClick={() => setLogKey(k => k + 1)}>
-                                ↻ Refresh
-                            </button>
-                        </div>
-                        <LogViewer key={logKey} urlFilter="/api/v1/scim/" />
-                    </div>
-                )}
+                <div className="row g-3">
+                    {/* ── Left: controls ── */}
+                    <div className="col-md-5">
+                        {/* Resource type pills */}
+                        <ul className="nav nav-pills mb-3">
+                            {SCIM_RESOURCE_TYPES.map(rt => (
+                                <li className="nav-item" key={rt}>
+                                    <button className={`nav-link ${resourceType === rt ? 'active' : ''}`}
+                                        onClick={() => changeResourceType(rt)}>
+                                        {rt}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
 
-                {scimTab === 'client' && (
-                    <>
-                        {/* ── Server selector bar ── */}
-                        <div className="d-flex align-items-center gap-2 mb-3 p-2 bg-light border rounded">
-                            <label className="form-label mb-0 small fw-bold text-nowrap">SCIM Server:</label>
-                            <select className="form-select form-select-sm"
-                                value={serverId || ''}
-                                onChange={e => onServerIdChange(e.target.value)}>
-                                <option value="">— select a server —</option>
-                                {servers.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name} — {s.url}</option>
-                                ))}
-                            </select>
-                            <button className="btn btn-outline-secondary btn-sm text-nowrap" onClick={() => setShowServerMgr(true)}>
-                                Manage Servers
-                            </button>
-                        </div>
-
-                        <div className="row g-3">
-                            {/* ── Left: controls ── */}
-                            <div className="col-md-5">
-                                {/* Resource type pills */}
-                                <ul className="nav nav-pills mb-3">
-                                    {SCIM_RESOURCE_TYPES.map(rt => (
-                                        <li className="nav-item" key={rt}>
-                                            <button className={`nav-link ${resourceType === rt ? 'active' : ''}`}
-                                                onClick={() => changeResourceType(rt)}>
-                                                {rt}
-                                            </button>
-                                        </li>
-                                    ))}
-                                </ul>
-
-                                {/* Action buttons */}
-                                <div className="mb-3 d-flex flex-wrap gap-2">
-                                    {SCIM_ACTIONS.filter(a => resourceType === 'Users' || !SCIM_USER_ONLY_ACTIONS.includes(a)).map(a => (
-                                        <button key={a}
-                                            className={`btn btn-sm ${action === a ? `btn-${SCIM_ACTION_COLORS[a]}` : `btn-outline-${SCIM_ACTION_COLORS[a]}`}`}
-                                            onClick={() => changeAction(a)}>
-                                            <span className="badge bg-dark me-1" style={{ fontSize: '0.65rem' }}>{SCIM_ACTION_METHODS[a]}</span>
-                                            {SCIM_ACTION_LABELS[a]}
-                                        </button>
-                                    ))}
-                                </div>
-
-                                {/* URL preview */}
-                                <div className="mb-3 p-2 bg-light rounded font-monospace small border">
-                                    <span className="badge bg-dark me-2">{method}</span>
-                                    <code style={{ wordBreak: 'break-all' }}>{buildUrl()}</code>
-                                    {selectedServer && (
-                                        <div className="text-muted mt-1" style={{ fontSize: '0.7rem' }}>
-                                            → {selectedServer.url}/scim/v2/{resourceType}{needsId && idInput ? `/${idInput}` : ''}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Workflow user picker (shown when preset requires a user) */}
-                                {presetActive && (
-                                    <div className="mb-3 p-2 border border-info rounded">
-                                        <label className="form-label small fw-bold text-info">
-                                            From Workflow — pick a user:
-                                        </label>
-                                        {workflowUsersLoading ? (
-                                            <div className="text-center py-1"><div className="spinner-border spinner-border-sm" /></div>
-                                        ) : (
-                                            <select className="form-select form-select-sm"
-                                                value={selectedWorkflowUserId}
-                                                onChange={e => handleWorkflowUserChange(e.target.value)}>
-                                                <option value="">— select a user —</option>
-                                                {workflowUsers.map(u => (
-                                                    <option key={u.okta_id} value={u.okta_id}>
-                                                        {u.first_name} {u.last_name} ({u.email})
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        )}
-                                        {lookupLoading && (
-                                            <div className="text-muted small mt-1">
-                                                <span className="spinner-border spinner-border-sm me-1" />
-                                                Looking up SCIM ID…
-                                            </div>
-                                        )}
-                                        {lookupError && <div className="text-warning small mt-1">⚠ {lookupError}</div>}
-                                        {idInput && !lookupLoading && (
-                                            <div className="text-success small mt-1">&#10003; SCIM ID: <code>{idInput}</code></div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Manual ID input */}
-                                {needsId && (
-                                    <div className="mb-3">
-                                        <label className="form-label small fw-bold">Resource ID{presetActive ? ' (auto-filled above)' : ''}:</label>
-                                        <input type="text" className="form-control form-control-sm font-monospace"
-                                            placeholder="e.g. a3bf7e5a-1234-..."
-                                            value={idInput} onChange={e => setIdInput(e.target.value)} />
-                                    </div>
-                                )}
-
-                                {/* Filter / pagination for list */}
-                                {needsFilter && (
-                                    <div className="mb-3">
-                                        <label className="form-label small fw-bold">Filter <span className="text-muted fw-normal">(SCIM filter, optional)</span>:</label>
-                                        <input type="text" className="form-control form-control-sm font-monospace mb-2"
-                                            placeholder={`userName eq "john@example.com"`}
-                                            value={filterInput} onChange={e => setFilterInput(e.target.value)} />
-                                        <div className="row g-2">
-                                            <div className="col">
-                                                <label className="form-label small">startIndex</label>
-                                                <input type="number" className="form-control form-control-sm" value={startIndex} onChange={e => setStartIndex(e.target.value)} />
-                                            </div>
-                                            <div className="col">
-                                                <label className="form-label small">count</label>
-                                                <input type="number" className="form-control form-control-sm" value={count} onChange={e => setCount(e.target.value)} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Payload editor */}
-                                {needsPayload && (
-                                    <div className="mb-3">
-                                        <label className="form-label small fw-bold">Request Body:</label>
-                                        <textarea className="form-control font-monospace" rows={10} style={{ fontSize: '0.8rem' }}
-                                            value={payload} onChange={e => setPayload(e.target.value)} />
-                                    </div>
-                                )}
-
-                                {/* Set Password inputs (body is built from these, never shown in plaintext) */}
-                                {isSetPassword && (
-                                    <ScimPasswordFields
-                                        password={newPassword} confirm={confirmPassword} show={showPassword}
-                                        onPasswordChange={setNewPassword} onConfirmChange={setConfirmPassword} onShowChange={setShowPassword} />
-                                )}
-
-                                <button className={`btn btn-${SCIM_ACTION_COLORS[action]}`}
-                                    onClick={handleExecute}
-                                    disabled={loading || !serverId}>
-                                    {loading && <span className="spinner-border spinner-border-sm me-2" />}
-                                    {loading ? 'Sending…' : `Execute ${SCIM_ACTION_LABELS[action]}`}
+                        {/* Action buttons */}
+                        <div className="mb-3 d-flex flex-wrap gap-2">
+                            {SCIM_ACTIONS.filter(a => resourceType === 'Users' || !SCIM_USER_ONLY_ACTIONS.includes(a)).map(a => (
+                                <button key={a}
+                                    className={`btn btn-sm ${action === a ? `btn-${SCIM_ACTION_COLORS[a]}` : `btn-outline-${SCIM_ACTION_COLORS[a]}`}`}
+                                    onClick={() => changeAction(a)}>
+                                    <span className="badge bg-dark me-1" style={{ fontSize: '0.65rem' }}>{SCIM_ACTION_METHODS[a]}</span>
+                                    {SCIM_ACTION_LABELS[a]}
                                 </button>
-                                {!serverId && <span className="text-muted small ms-2">Select a server first</span>}
-                            </div>
-
-                            {/* ── Right: response ── */}
-                            <div className="col-md-7">
-                                <div className="d-flex align-items-center mb-2 gap-2">
-                                    <span className="fw-bold small">Response</span>
-                                    {httpStatus && <span className={`badge ${statusBadgeClass}`}>{httpStatus}</span>}
-                                    {(response !== null || error) && (
-                                        <button className="btn btn-outline-secondary btn-sm ms-auto" onClick={resetResult}>Clear</button>
-                                    )}
-                                </div>
-                                {loading && <div className="text-center py-4"><div className="spinner-border text-primary" /></div>}
-                                {!loading && response !== null && (
-                                    <div>
-                                        <div className="text-success fw-bold small mb-1">&#10003; Success</div>
-                                        {canvasNotice === 'running' && <div className="small text-muted mb-2"><span className="spinner-border spinner-border-sm me-1" />Saving to DB…</div>}
-                                        {canvasNotice === 'done' && (
-                                            <div className="small text-success mb-2">
-                                                &#10003; Saved to DB and added to the canvas
-                                                <button className="btn btn-link btn-sm py-0" onClick={onGoToCanvas}>Go to canvas →</button>
-                                            </div>
-                                        )}
-                                        {canvasNotice && typeof canvasNotice === 'object' && <ApiError data={canvasNotice} compact />}
-                                        {resourceType === 'Users' && <ScimUserResults response={response} serverId={serverId} onShowUser={onShowUser} onGoToCanvas={onGoToCanvas} />}
-                                        <pre className="json-pre" style={{ maxHeight: '65vh' }}>{fmtJson(response)}</pre>
-                                    </div>
-                                )}
-                                {!loading && error && (
-                                    <div>
-                                        <div className="text-danger fw-bold small mb-1">&#10007; Error</div>
-                                        <pre className="json-pre text-danger" style={{ maxHeight: '65vh' }}>{error}</pre>
-                                    </div>
-                                )}
-                                {!loading && response === null && !error && (
-                                    <div className="text-center text-muted py-5">
-                                        <p className="mb-1">No response yet.</p>
-                                        <p className="small">Configure a request on the left and click Execute.</p>
-                                    </div>
-                                )}
-                            </div>
+                            ))}
                         </div>
-                    </>
-                )}
+
+                        {/* URL preview */}
+                        <div className="mb-3 p-2 bg-light rounded font-monospace small border">
+                            <span className="badge bg-dark me-2">{method}</span>
+                            <code style={{ wordBreak: 'break-all' }}>{buildUrl()}</code>
+                            {selectedServer && (
+                                <div className="text-muted mt-1" style={{ fontSize: '0.7rem' }}>
+                                    → {selectedServer.url}/scim/v2/{resourceType}{needsId && idInput ? `/${idInput}` : ''}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Workflow user picker (shown when preset requires a user) */}
+                        {presetActive && (
+                            <div className="mb-3 p-2 border border-info rounded">
+                                <label className="form-label small fw-bold text-info">
+                                    From Workflow — pick a user:
+                                </label>
+                                {workflowUsersLoading ? (
+                                    <div className="text-center py-1"><div className="spinner-border spinner-border-sm" /></div>
+                                ) : (
+                                    <select className="form-select form-select-sm"
+                                        value={selectedWorkflowUserId}
+                                        onChange={e => handleWorkflowUserChange(e.target.value)}>
+                                        <option value="">— select a user —</option>
+                                        {workflowUsers.map(u => (
+                                            <option key={u.okta_id} value={u.okta_id}>
+                                                {u.first_name} {u.last_name} ({u.email})
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                                {lookupLoading && (
+                                    <div className="text-muted small mt-1">
+                                        <span className="spinner-border spinner-border-sm me-1" />
+                                        Looking up SCIM ID…
+                                    </div>
+                                )}
+                                {lookupError && <div className="text-warning small mt-1">⚠ {lookupError}</div>}
+                                {idInput && !lookupLoading && (
+                                    <div className="text-success small mt-1">&#10003; SCIM ID: <code>{idInput}</code></div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Manual ID input */}
+                        {needsId && (
+                            <div className="mb-3">
+                                <label className="form-label small fw-bold">Resource ID{presetActive ? ' (auto-filled above)' : ''}:</label>
+                                <input type="text" className="form-control form-control-sm font-monospace"
+                                    placeholder="e.g. a3bf7e5a-1234-..."
+                                    value={idInput} onChange={e => setIdInput(e.target.value)} />
+                            </div>
+                        )}
+
+                        {/* Filter / pagination for list */}
+                        {needsFilter && (
+                            <div className="mb-3">
+                                <label className="form-label small fw-bold">Filter <span className="text-muted fw-normal">(SCIM filter, optional)</span>:</label>
+                                <input type="text" className="form-control form-control-sm font-monospace mb-2"
+                                    placeholder={`userName eq "john@example.com"`}
+                                    value={filterInput} onChange={e => setFilterInput(e.target.value)} />
+                                <div className="row g-2">
+                                    <div className="col">
+                                        <label className="form-label small">startIndex</label>
+                                        <input type="number" className="form-control form-control-sm" value={startIndex} onChange={e => setStartIndex(e.target.value)} />
+                                    </div>
+                                    <div className="col">
+                                        <label className="form-label small">count</label>
+                                        <input type="number" className="form-control form-control-sm" value={count} onChange={e => setCount(e.target.value)} />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Payload editor */}
+                        {needsPayload && (
+                            <div className="mb-3">
+                                <label className="form-label small fw-bold">Request Body:</label>
+                                <textarea className="form-control font-monospace" rows={10} style={{ fontSize: '0.8rem' }}
+                                    value={payload} onChange={e => setPayload(e.target.value)} />
+                            </div>
+                        )}
+
+                        {/* Set Password inputs (body is built from these, never shown in plaintext) */}
+                        {isSetPassword && (
+                            <ScimPasswordFields
+                                password={newPassword} confirm={confirmPassword} show={showPassword}
+                                onPasswordChange={setNewPassword} onConfirmChange={setConfirmPassword} onShowChange={setShowPassword} />
+                        )}
+
+                        <button className={`btn btn-${SCIM_ACTION_COLORS[action]}`}
+                            onClick={handleExecute}
+                            disabled={loading || !serverId}>
+                            {loading && <span className="spinner-border spinner-border-sm me-2" />}
+                            {loading ? 'Sending…' : `Execute ${SCIM_ACTION_LABELS[action]}`}
+                        </button>
+                        {!serverId && <span className="text-muted small ms-2">Select a server first</span>}
+                    </div>
+
+                    {/* ── Right: response ── */}
+                    <div className="col-md-7">
+                        <div className="d-flex align-items-center mb-2 gap-2">
+                            <span className="fw-bold small">Response</span>
+                            {httpStatus && <span className={`badge ${statusBadgeClass}`}>{httpStatus}</span>}
+                            {(response !== null || error) && (
+                                <button className="btn btn-outline-secondary btn-sm ms-auto" onClick={resetResult}>Clear</button>
+                            )}
+                        </div>
+                        {loading && <div className="text-center py-4"><div className="spinner-border text-primary" /></div>}
+                        {!loading && response !== null && (
+                            <div>
+                                <div className="text-success fw-bold small mb-1">&#10003; Success</div>
+                                {canvasNotice === 'running' && <div className="small text-muted mb-2"><span className="spinner-border spinner-border-sm me-1" />Saving to DB…</div>}
+                                {canvasNotice === 'done' && (
+                                    <div className="small text-success mb-2">
+                                        &#10003; Saved to DB and added to the canvas
+                                        <button className="btn btn-link btn-sm py-0" onClick={onGoToCanvas}>Go to canvas →</button>
+                                    </div>
+                                )}
+                                {canvasNotice && typeof canvasNotice === 'object' && <ApiError data={canvasNotice} compact />}
+                                {resourceType === 'Users' && <ScimUserResults response={response} serverId={serverId} onShowUser={onShowUser} onGoToCanvas={onGoToCanvas} />}
+                                <pre className="json-pre" style={{ maxHeight: '65vh' }}>{fmtJson(response)}</pre>
+                            </div>
+                        )}
+                        {!loading && error && (
+                            <div>
+                                <div className="text-danger fw-bold small mb-1">&#10007; Error</div>
+                                <pre className="json-pre text-danger" style={{ maxHeight: '65vh' }}>{error}</pre>
+                            </div>
+                        )}
+                        {!loading && response === null && !error && (
+                            <div className="text-center text-muted py-5">
+                                <p className="mb-1">No response yet.</p>
+                                <p className="small">Configure a request on the left and click Execute.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
         </div>
     );

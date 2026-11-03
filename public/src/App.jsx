@@ -1,7 +1,8 @@
 const App = () => {
     const { isAuthenticated, isLoading, user, logout, refresh, login, showExpiry, loggedOut, countdown } = useAuth();
-    const [view, setView] = React.useState('workflow'); // 'workflow' | 'scim'
+    const [view, setView] = React.useState('workflow'); // 'workflow' | 'scim' | 'logs'
     const [modal, setModal] = React.useState(null); // { type, props }
+    const [logRequest, setLogRequest] = React.useState(null); // { source, context, nonce } → LogsView
     const [scimPreset, setScimPreset] = React.useState(null);
     const [selectedScimServerId, setSelectedScimServerId] = React.useState('');
     const [authError] = React.useState(() => {
@@ -22,9 +23,16 @@ const App = () => {
         openModal(NODE_TO_MODAL[nodeId]);
     }, [openModal]);
 
+    // Switch to the Logs tab with a source and context filters (context: { label, filters } or null)
+    const openLogs = React.useCallback((source, context) => {
+        setModal(null);
+        setLogRequest({ source, context, nonce: Date.now() });
+        setView('logs');
+    }, []);
+
     const handleViewLogs = React.useCallback((nodeId) => {
-        openModal(NODE_TO_LOGS[nodeId] || 'logs_create');
-    }, [openModal]);
+        openLogs('internal', NODE_LOG_CONTEXTS[nodeId] || null);
+    }, [openLogs]);
 
     // Switch to the SCIM client with a preset ({ resourceType, action, requiresUser, scimId?, serverId?, patchOps? })
     const openScim = React.useCallback((preset) => {
@@ -51,7 +59,7 @@ const App = () => {
     const onNodesChange = React.useCallback((c) => setNodes(n => ReactFlow.applyNodeChanges(c, n)), []);
     const onEdgesChange = React.useCallback((c) => setEdges(e => ReactFlow.applyEdgeChanges(c, e)), []);
     const flowRef = React.useRef(null);
-    // The canvas unmounts in the SCIM view; drop its instance so showUserNode doesn't fit a stale one
+    // The canvas unmounts in the other tabs; drop its instance so showUserNode doesn't fit a stale one
     // (React Flow fits all nodes again when it remounts)
     React.useEffect(() => { if (view !== 'workflow') flowRef.current = null; }, [view]);
 
@@ -86,25 +94,33 @@ const App = () => {
 
     return (
         <div className="container-fluid h-100 p-0">
-            <nav className="navbar navbar-dark bg-dark">
-                <div className="container-fluid">
+            <nav className="navbar navbar-dark bg-dark app-navbar">
+                <div className="container-fluid h-100">
                     <span className="navbar-brand mb-0 h1">User Management Process Flow</span>
+                    <ul className="nav nav-tabs app-tabs me-auto">
+                        {APP_TABS.map(t => (
+                            <li className="nav-item" key={t.id}>
+                                <button className={`nav-link ${view === t.id ? 'active' : ''}`} onClick={() => setView(t.id)}>{t.label}</button>
+                            </li>
+                        ))}
+                    </ul>
                     <div className="d-flex align-items-center gap-2">
-                        <button className={`btn btn-sm ${view === 'workflow' ? 'btn-light' : 'btn-outline-light'}`} onClick={() => setView('workflow')}>Workflow</button>
-                        <button className={`btn btn-sm ${view === 'scim' ? 'btn-light' : 'btn-outline-light'}`} onClick={() => setView('scim')}>SCIM Client</button>
-                        <span className="text-light ms-2">{user?.name}</span>
+                        <span className="text-light">{user?.name}</span>
                         <button className="btn btn-outline-light btn-sm" onClick={logout}>Logout</button>
                     </div>
                 </div>
             </nav>
-            {view === 'workflow' ? (
+            {/* React Flow needs a visible container to measure, so the canvas mounts only on its tab;
+                the SCIM client and logs stay mounted (hidden) to keep their state across tab switches */}
+            {view === 'workflow' && (
                 <div style={{ height: 'calc(100vh - 56px)' }}>
                     <ReactFlow.ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} onInit={i => { flowRef.current = i; }} fitView>
                         <ReactFlow.Controls />
                         <ReactFlow.Background variant="dots" gap={12} size={1} />
                     </ReactFlow.ReactFlow>
                 </div>
-            ) : (
+            )}
+            <div className={view === 'scim' ? '' : 'd-none'}>
                 <ScimClient
                     preset={scimPreset}
                     onClearPreset={() => setScimPreset(null)}
@@ -112,8 +128,12 @@ const App = () => {
                     onServerIdChange={setSelectedScimServerId}
                     onShowUser={showUserNode}
                     onGoToCanvas={() => setView('workflow')}
+                    onViewLogs={(context) => openLogs('scim', context)}
                 />
-            )}
+            </div>
+            <div className={view === 'logs' ? '' : 'd-none'}>
+                <LogsView request={logRequest} active={view === 'logs'} />
+            </div>
             {cfg && (
                 <Modal show={true} onClose={closeModal} title={cfg.title} size={cfg.size}>
                     <cfg.Content onClose={closeModal} onOpenModal={openModal} onScimNavigate={handleScimNavigate} onOpenScim={openScim} onShowUser={showUserNode} {...cfg.props} {...modal.props} />

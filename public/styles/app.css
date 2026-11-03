@@ -1,3 +1,10 @@
 #root { height: 100vh; }
+
+/* Top navbar: fixed 56px (views size themselves to calc(100vh - 56px)); tabs sit on its bottom edge */
+.app-navbar { height: 56px; padding-top: 0; padding-bottom: 0; }
+.app-tabs { align-self: flex-end; border-bottom: 0; }
+.app-tabs .nav-link { color: rgba(255, 255, 255, 0.7); padding: 0.5rem 1rem; }
+.app-tabs .nav-link:hover { color: #fff; border-color: transparent; }
+.app-tabs .nav-link.active { color: #212529; background: #fff; border-color: #fff; }
 .json-pre { background: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 0.75rem; max-height: 200px; overflow: auto; text-align: left; white-space: pre-wrap; word-break: break-all; }
 .update-modal-min-height { min-height: 475px; }

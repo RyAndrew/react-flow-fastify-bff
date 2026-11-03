@@ -1,19 +1,9 @@
-const LogViewer = ({ urlFilter }) => {
-    const [logs, setLogs] = React.useState([]);
-    const [loading, setLoading] = React.useState(true);
+// BFF access log rows (log_access) for the Internal and SCIM Client log sources; LogsView does the querying
+const AccessLogTable = ({ logs }) => {
     const [expanded, setExpanded] = React.useState(null);
 
-    React.useEffect(() => {
-        const params = new URLSearchParams({ limit: '50' });
-        if (urlFilter) params.set('url_contains', urlFilter);
-        api(`/api/v1/logs?${params}`).then(({ data }) => { setLogs(data.logs || []); setLoading(false); });
-    }, [urlFilter]);
-
-    if (loading) return <div className="text-center py-3"><div className="spinner-border text-primary" /></div>;
-    if (!logs.length) return <p className="text-muted">No logs found.</p>;
-
     return (
-        <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
+        <div>
             <table className="table table-sm table-striped log-table">
                 <thead>
                     <tr>
@@ -31,7 +21,7 @@ const LogViewer = ({ urlFilter }) => {
                     {logs.map(log => (
                         <React.Fragment key={log.id}>
                             <tr onClick={() => setExpanded(expanded === log.id ? null : log.id)} style={{ cursor: 'pointer' }}>
-                                <td>{new Date(log.created_at).toLocaleTimeString()}</td>
+                                <td title={log.created_at}>{fmtSqliteTime(log.created_at)}</td>
                                 <td><span className="badge bg-dark">{log.method}</span></td>
                                 <td title={log.url}>{log.url}</td>
                                 <td><span className={`badge bg-${log.status_code < 400 ? 'success' : 'danger'}`}>{log.status_code}</span></td>
