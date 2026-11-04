@@ -1,3 +1,25 @@
+// Statuses Okta can create a user in directly — the rest (SUSPENDED, LOCKED_OUT, ...) only come from lifecycle actions
+const CREATE_STATUSES = [
+    { value: 'STAGED',           label: 'STAGED — created, not activated',                       query: { activate: 'false' } },
+    { value: 'PROVISIONED',      label: 'PROVISIONED — activated, user sets password via email', query: { activate: 'true' } },
+    { value: 'ACTIVE',           label: 'ACTIVE — activated with a password',                    query: { activate: 'true' }, password: true },
+    { value: 'PASSWORD_EXPIRED', label: 'PASSWORD_EXPIRED — must change password at next login', query: { activate: 'true', nextLogin: 'changePassword' }, password: true },
+];
+
+const randomPassword = () => {
+    const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const rand = crypto.getRandomValues(new Uint32Array(12));
+    return 'Aa1!' + Array.from(rand, n => chars[n % chars.length]).join('');
+};
+
+// Add or remove credentials.password to match what the chosen status needs
+const withCredentials = (body, statusValue) => {
+    const needsPassword = CREATE_STATUSES.find(s => s.value === statusValue)?.password;
+    const { credentials, ...rest } = body;
+    if (!needsPassword) return rest;
+    return { ...rest, credentials: { password: { value: credentials?.password?.value || randomPassword() } } };
+};
+
 const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
     const ts = Date.now();
     const [payload, setPayload] = React.useState(JSON.stringify({
@@ -14,6 +36,7 @@ const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
     const [error, setError] = React.useState(null);
     const [scimImports, setScimImports] = React.useState([]);
     const [importedId, setImportedId] = React.useState('');
+    const [userStatus, setUserStatus] = React.useState('PROVISIONED');
 
     React.useEffect(() => {
         api('/api/v1/users?source=scim').then(({ data }) => {
@@ -21,24 +44,52 @@ const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
             setScimImports(list);
             if (initialImportedId) selectImport(String(initialImportedId), list);
         });
+        if (!initialImportedId) randomName();
     }, []);
+
+    // Prefill the payload with a random person from GET /api/v1/names/random
+    const randomName = async () => {
+        const { ok, data } = await api('/api/v1/names/random');
+        if (!ok) { setError(`Random name failed: ${data?.error || 'unknown error'}`); return; }
+        const t = Date.now();
+        const email = `${data.firstName}.${data.lastName}+${t}@example.com`.toLowerCase();
+        setImportedId('');
+        setError(null);
+        setPayload(JSON.stringify(withCredentials({
+            profile: {
+                firstName: data.firstName,
+                middleName: data.middleName,
+                lastName: data.lastName,
+                email,
+                login: email,
+            },
+        }, userStatus), null, 2));
+    };
 
     // Prefill the payload from a SCIM import; on create the server links that row to the new Okta user
     const selectImport = (id, list) => {
         setImportedId(id);
         const u = list.find(x => String(x.id) === id);
         if (!u) return;
-        setPayload(JSON.stringify({
+        setPayload(JSON.stringify(withCredentials({
             profile: {
                 firstName: u.first_name || '',
                 lastName: u.last_name || '',
                 email: u.email,
                 login: u.login?.includes('@') ? u.login : u.email,
             },
-        }, null, 2));
+        }, userStatus), null, 2));
     };
 
-    const createUrl = `/api/v1/users/create${importedId ? `?importedId=${importedId}` : ''}`;
+    // Sync the payload's credentials with the chosen status; leave it alone if the JSON is mid-edit and invalid
+    const selectStatus = (value) => {
+        setUserStatus(value);
+        try { setPayload(JSON.stringify(withCredentials(JSON.parse(payload), value), null, 2)); } catch { }
+    };
+
+    const statusQuery = CREATE_STATUSES.find(s => s.value === userStatus).query;
+    const createQs = new URLSearchParams({ ...statusQuery, ...(importedId ? { importedId } : {}) });
+    const createUrl = `/api/v1/users/create?${createQs}`;
 
     const handleCreate = async () => {
         let parsed;
@@ -80,7 +131,14 @@ const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
                                 </option>
                             ))}
                         </select>
-                        <label className="form-label small fw-bold">Payload (edit before sending):</label>
+                        <label className="form-label small fw-bold">Initial status:</label>
+                        <select className="form-select form-select-sm mb-3" value={userStatus} onChange={e => selectStatus(e.target.value)}>
+                            {CREATE_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        </select>
+                        <div className="d-flex justify-content-between align-items-end mb-1">
+                            <label className="form-label small fw-bold mb-0">Payload (edit before sending):</label>
+                            <button className="btn btn-sm btn-outline-secondary" onClick={randomName}>Random Name</button>
+                        </div>
                         <textarea className="form-control font-monospace" rows={10} style={{ fontSize: '0.8rem' }}
                             value={payload} onChange={e => setPayload(e.target.value)} />
                         {typeof error === 'string' && <p className="text-danger mt-2 mb-0">{error}</p>}
