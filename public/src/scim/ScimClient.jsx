@@ -27,7 +27,13 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
     const [confirmPassword, setConfirmPassword] = React.useState('');
     const [showPassword, setShowPassword] = React.useState(false);
 
+    // Create User state (template form)
+    const [createStatus, setCreateStatus] = React.useState(DEFAULT_CREATE_STATUS.scim);
+    const [createPrefillId, setCreatePrefillId] = React.useState('');
+    const [localUsers, setLocalUsers] = React.useState([]);
+
     const isSetPassword = action === 'setPassword';
+    const isUserCreate = action === 'create' && resourceType === 'Users';
     const needsId      = ['get', 'replace', 'patch', 'setPassword', 'delete'].includes(action);
     const needsPayload = ['create', 'replace', 'patch'].includes(action);
     const needsFilter  = action === 'list';
@@ -91,6 +97,20 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
         clearPasswordFields();
         setPayload(needsPayload ? getScimDefaultPayload(resourceType, action) : '');
     }, [action, resourceType]);
+
+    // Local users (Okta-created or imported) to prefill a SCIM create from; the new SCIM user is linked to that row
+    React.useEffect(() => {
+        if (!isUserCreate) return;
+        setCreatePrefillId('');
+        api('/api/v1/users?scope=all').then(({ data }) => setLocalUsers((data.users || []).filter(u => u.source !== 'scim')));
+    }, [isUserCreate]);
+
+    const createPrefillOptions = React.useMemo(() => localUsers.map(u => ({
+        value: String(u.id),
+        label: `${u.first_name} ${u.last_name} (${u.login || u.email})${u.scim_id ? ' — already linked to SCIM' : ''}`,
+        disabled: !!u.scim_id,
+        person: { firstName: u.first_name || '', lastName: u.last_name || '', email: u.email, login: u.login || u.email },
+    })), [localUsers]);
 
     // Look up SCIM user by local user's email/login when user is picked
     const handleWorkflowUserChange = async (oktaId) => {
@@ -181,10 +201,11 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
         setLoading(false);
     };
 
-    // Like the Create User node: save the new SCIM user to the local DB and add it to the canvas
+    // Like the Create User node: save the new SCIM user to the local DB (linked to the prefill user, if any) and add it to the canvas
     const addCreatedUserToCanvas = async (scimId) => {
         setCanvasNotice('running');
-        const { ok, data } = await api(`/api/v1/scim/Users/${encodeURIComponent(scimId)}/import`, {
+        const qs = createPrefillId ? `?localId=${encodeURIComponent(createPrefillId)}` : '';
+        const { ok, data } = await api(`/api/v1/scim/Users/${encodeURIComponent(scimId)}/import${qs}`, {
             method: 'POST',
             headers: { 'X-Scim-Server-Id': serverId },
         });
@@ -346,8 +367,16 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
                             </div>
                         )}
 
-                        {/* Payload editor */}
-                        {needsPayload && (
+                        {/* Payload editor: Create User uses the shared template form */}
+                        {isUserCreate && (
+                            <div className="mb-3">
+                                <UserCreateForm target="scim" payload={payload} onPayloadChange={setPayload}
+                                    status={createStatus} onStatusChange={setCreateStatus}
+                                    prefillOptions={createPrefillOptions} prefillLabel="Prefill from local user"
+                                    prefillValue={createPrefillId} onPrefillChange={setCreatePrefillId} />
+                            </div>
+                        )}
+                        {needsPayload && !isUserCreate && (
                             <div className="mb-3">
                                 <label className="form-label small fw-bold">Request Body:</label>
                                 <textarea className="form-control font-monospace" rows={10} style={{ fontSize: '0.8rem' }}

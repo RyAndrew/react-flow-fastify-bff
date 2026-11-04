@@ -22,6 +22,8 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
     const [showPassword, setShowPassword] = React.useState(false);
     const [running, setRunning] = React.useState(false);
     const [result, setResult] = React.useState(null);       // { ok, status, data }
+    const [createStatus, setCreateStatus] = React.useState(DEFAULT_CREATE_STATUS.scim);
+    const [linkNotice, setLinkNotice] = React.useState(null); // after create: error from linking the local row
 
     React.useEffect(() => {
         api('/api/v1/scim-servers').then(({ data }) => {
@@ -32,6 +34,7 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
     }, []);
 
     const userName = user.login || user.email;
+    const createPerson = React.useMemo(() => ({ firstName: user.first_name || '', lastName: user.last_name || '', email: user.email, login: userName }), [user]);
 
     const resolve = async (sid = serverId) => {
         if (!sid) return;
@@ -56,8 +59,8 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
     // Prefill per operation from the resolved user (not clearing result: it changes after a successful op)
     React.useEffect(() => {
         setPassword(''); setConfirm(''); setShowPassword(false);
-        if (!scimUser) setPayload(JSON.stringify(buildScimUserFromLocal(user), null, 2));
-        else if (op === 'patch') setPayload(JSON.stringify(buildScimUserPatchFrom(scimUser, user), null, 2));
+        // Create (no SCIM user) is filled by UserCreateForm
+        if (scimUser && op === 'patch') setPayload(JSON.stringify(buildScimUserPatchFrom(scimUser, user), null, 2));
     }, [op, scimUser]);
 
     const run = async (method, body) => {
@@ -78,7 +81,16 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
     const runPayload = (method) => {
         let body;
         try { body = JSON.parse(payload); } catch { setResult({ ok: false, data: 'Invalid JSON payload' }); return; }
-        run(method, body);
+        return run(method, body);
+    };
+
+    // Create, then link this local row to the new SCIM user so later lookups use its id, not userName
+    const runCreate = async () => {
+        setLinkNotice(null);
+        const res = await runPayload('POST');
+        if (!res?.ok || !res.data?.id) return;
+        const link = await scimRequest(serverId, 'POST', `Users/${encodeURIComponent(res.data.id)}/import?localId=${user.id}`);
+        if (!link.ok) setLinkNotice(link.data);
     };
 
     const runPassword = () => {
@@ -168,9 +180,9 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
                 ) : serverId ? (
                     <div className="mb-2">
                         <p className="small mb-2">No user with userName <code>{userName}</code> on this server. Create it:</p>
-                        <textarea className="form-control font-monospace mb-2" rows={10} style={{ fontSize: '0.8rem' }}
-                            value={payload} onChange={e => setPayload(e.target.value)} />
-                        <button className="btn btn-success btn-sm" disabled={running} onClick={() => runPayload('POST')}>Create on SCIM</button>
+                        <UserCreateForm target="scim" payload={payload} onPayloadChange={setPayload}
+                            status={createStatus} onStatusChange={setCreateStatus} person={createPerson} rows={10} />
+                        <button className="btn btn-success btn-sm mt-2" disabled={running} onClick={runCreate}>Create on SCIM</button>
                     </div>
                 ) : null}
 
@@ -183,6 +195,7 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
                                 {result.status === 204 && <span className="text-muted fw-normal"> — no content</span>}
                             </div>
                         ) : <ApiError data={result.data} />}
+                        {linkNotice && <div className="mb-1"><span className="small text-warning">⚠ Created, but linking the local user failed:</span><ApiError data={linkNotice} compact /></div>}
                         {result.ok && result.data && <pre className="json-pre">{fmtJson(result.data)}</pre>}
                     </div>
                 )}

@@ -34,15 +34,6 @@ const scimRequest = async (serverId, method, path, body) => {
     return { ok: res.ok, status: res.status, data: res.ok ? data : { error: `SCIM server returned ${res.status}`, details: data } };
 };
 
-// SCIM User resource for creating a local users row on a SCIM server
-const buildScimUserFromLocal = (u) => ({
-    schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
-    userName: u.login || u.email,
-    name: { givenName: u.first_name || '', familyName: u.last_name || '' },
-    emails: [{ value: u.email, type: 'work', primary: true }],
-    active: true,
-});
-
 // buildScimUserPatch prefilled from an existing SCIM user's current values (falls back to a local users row)
 const buildScimUserPatchFrom = (scimUser, local = {}) => buildScimUserPatch({
     givenName:  scimUser.name?.givenName || local.first_name,
@@ -51,6 +42,7 @@ const buildScimUserPatchFrom = (scimUser, local = {}) => buildScimUserPatch({
     address:    scimUser.addresses?.find(a => a.primary) || scimUser.addresses?.[0] || SAMPLE_ADDRESS,
 });
 
+// Users.create is a placeholder: the SCIM client renders the create body from a template (see UserCreateForm)
 const getScimDefaultPayload =(resourceType, action) => {
     const ts = Date.now();
     const defaults = {

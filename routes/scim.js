@@ -45,6 +45,7 @@ export default async function scimRoutes(fastify) {
   fastify.delete('/Users/:id', (req, reply) => proxy(req, reply, 'DELETE', `/scim/v2/Users/${req.params.id}`, null));
 
   // POST /Users/:id/import — fetch a SCIM user and add (or refresh) it in the local users table
+  // ?localId= — local row (e.g. an Okta user) the SCIM user was created from: link it instead of inserting a new row
   fastify.post('/Users/:id/import', async (request, reply) => {
     const server = await loadServer(request, reply);
     if (!server) return reply;
@@ -61,6 +62,13 @@ export default async function scimRoutes(fastify) {
       last_name: data.name?.familyName,
       login: data.userName,
     };
+
+    const { localId } = request.query;
+    const linked = localId
+      ? await db('users').where({ id: localId }).whereNull('scim_id').update({ scim_server_id: server.id, scim_id: data.id })
+      : 0;
+    if (linked) return { ok: true, user: await db('users').where({ id: localId }).first() };
+
     await db('users')
       .insert({ source: 'scim', scim_server_id: server.id, scim_id: data.id, ...profile })
       .onConflict(['scim_server_id', 'scim_id'])
