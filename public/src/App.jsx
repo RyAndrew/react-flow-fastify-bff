@@ -84,6 +84,15 @@ const App = () => {
         setTimeout(() => flowRef.current?.fitView({ padding: 0.2, duration: 300 }), 50);
     }, [openModal, removeNode]);
 
+    // A user changed in the local DB: give its node (if one is on the canvas) the stored row, or remove the
+    // node when the row was deleted (row = null). Doesn't add, select or move nodes.
+    const onUserChanged = React.useCallback((localId, row) => {
+        const id = `user-${localId}`;
+        setNodes(ns => (row
+            ? ns.map(n => n.id === id ? { ...n, data: { ...n.data, user: row } } : n)
+            : ns.filter(n => n.id !== id)));
+    }, []);
+
     if (isLoading) return <LoadingScreen />;
 
     if (authError) return <AuthErrorScreen message={authError} onRetry={login} />;
@@ -127,6 +136,7 @@ const App = () => {
                     serverId={selectedScimServerId}
                     onServerIdChange={setSelectedScimServerId}
                     onShowUser={showUserNode}
+                    onUserChanged={onUserChanged}
                     onGoToCanvas={() => setView('workflow')}
                     onViewLogs={(context) => openLogs('scim', context)}
                 />
@@ -136,7 +146,7 @@ const App = () => {
             </div>
             {cfg && (
                 <Modal show={true} onClose={closeModal} title={cfg.title} size={cfg.size}>
-                    <cfg.Content onClose={closeModal} onOpenModal={openModal} onScimNavigate={handleScimNavigate} onOpenScim={openScim} onShowUser={showUserNode} {...cfg.props} {...modal.props} />
+                    <cfg.Content onClose={closeModal} onOpenModal={openModal} onScimNavigate={handleScimNavigate} onOpenScim={openScim} onShowUser={showUserNode} onUserChanged={onUserChanged} {...cfg.props} {...modal.props} />
                 </Modal>
             )}
             {showExpiry && <SessionExpiryDialog countdown={countdown} onRefresh={refresh} onLogout={logout} />}

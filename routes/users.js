@@ -1,11 +1,23 @@
 import { db } from '../db.js';
 import { requireAccessToken } from '../lib/auth-guards.js';
 import { callDownstream } from '../lib/downstream.js';
+import { fromOkta, getUser, saveUser, serializeUser, OKTA_UNLINK } from '../lib/user-store.js';
 
 export default async function userRoutes(fastify) {
   const downstreamApiUrl = 'http://127.0.0.1:3000';
 
   fastify.addHook('preHandler', requireAccessToken);
+
+  // Re-reads the Okta user after an action whose response isn't the user (lifecycle, deactivate) and saves
+  // it locally. The action stays as the audit-logged downstream call. Returns the Okta user, or null.
+  const refreshFromOkta = async (request, oktaId) => {
+    const actionDownstream = request.downstream;
+    const { response, data } = await callDownstream(request, 'GET', `${downstreamApiUrl}/api/v1/users/${encodeURIComponent(oktaId)}`, null);
+    request.downstream = actionDownstream;
+    if (!response.ok || !data?.id) return null;
+    await saveUser({ okta_id: oktaId }, fromOkta(data));
+    return data;
+  };
 
   // GET / — list users from local DB
   // Default: only users linked to Okta (have an okta_id).
@@ -17,7 +29,7 @@ export default async function userRoutes(fastify) {
     if (source) query = query.where({ source });
     else if (scope !== 'all') query = query.whereNotNull('okta_id');
     const users = await query;
-    return { users };
+    return { users: users.map(serializeUser) };
   });
 
   // GET /okta/search — search Okta users
@@ -82,27 +94,16 @@ export default async function userRoutes(fastify) {
       return reply.status(response.status).send({ error: 'Downstream API error', details: data });
     }
 
-    // Persist to local users table
-    const row = {
-      okta_id: data.id,
-      email: data.profile?.email,
-      first_name: data.profile?.firstName,
-      last_name: data.profile?.lastName,
-      login: data.profile?.login,
-      status: data.status,
-    };
-    const linked = importedId
-      ? await db('users').where({ id: importedId }).whereNull('okta_id').update(row)
-      : 0;
-    if (!linked) await db('users').insert(row);
-
-    const localUser = await db('users').where({ okta_id: data.id }).first();
+    // Save the whole Okta profile locally: a SCIM import it was created from, else a new row
+    const fields = fromOkta(data);
+    const localUser = (importedId && await saveUser({ id: importedId, okta_id: null }, fields))
+      || await saveUser({ okta_id: data.id }, fields, { insert: { source: 'created' } });
     return { ok: true, user: data, localUser };
   });
 
   // GET /local/:id — one row from the local users table
   fastify.get('/local/:id', async (request, reply) => {
-    const user = await db('users').where({ id: request.params.id }).first();
+    const user = await getUser({ id: request.params.id });
     if (!user) return reply.status(404).send({ error: `Local user ${request.params.id} not found` });
     return { ok: true, user };
   });
@@ -133,19 +134,7 @@ export default async function userRoutes(fastify) {
       return reply.status(response.status).send({ error: 'Downstream API error', details: data });
     }
 
-    const profile = {
-      email: data.profile?.email,
-      first_name: data.profile?.firstName,
-      last_name: data.profile?.lastName,
-      login: data.profile?.login,
-      status: data.status,
-    };
-    await db('users')
-      .insert({ okta_id: data.id, source: 'okta', ...profile })
-      .onConflict('okta_id')
-      .merge(Object.keys(profile));
-
-    const user = await db('users').where({ okta_id: data.id }).first();
+    const user = await saveUser({ okta_id: data.id }, fromOkta(data), { insert: { source: 'okta' } });
     return { ok: true, user };
   });
 
@@ -162,16 +151,9 @@ export default async function userRoutes(fastify) {
       return reply.status(response.status).send({ error: 'Downstream API error', details: data });
     }
 
-    // Sync local record
-    await db('users').where({ okta_id: oktaId }).update({
-      email: data.profile?.email,
-      first_name: data.profile?.firstName,
-      last_name: data.profile?.lastName,
-      login: data.profile?.login,
-      status: data.status,
-    });
-
-    return { ok: true, user: data };
+    // Okta returns the updated user (profile and credential updates alike)
+    const localUser = await saveUser({ okta_id: oktaId }, fromOkta(data));
+    return { ok: true, user: data, localUser };
   });
 
   // GET /groups/search?q= — search groups by name
@@ -250,18 +232,12 @@ export default async function userRoutes(fastify) {
       return reply.status(response.status).send({ error: 'Downstream API error', details: data });
     }
 
-    // Refresh user status from downstream; keep the lifecycle call as the audit-logged downstream record
-    const actionDownstream = request.downstream;
-    const statusUrl = `${downstreamApiUrl}/api/v1/users/${oktaId}`;
-    const { data: refreshed } = await callDownstream(request, 'GET', statusUrl, null);
-    request.downstream = actionDownstream;
-    if (refreshed?.status) {
-      await db('users').where({ okta_id: oktaId }).update({ status: refreshed.status });
-    }
+    const refreshed = await refreshFromOkta(request, oktaId);
+    const localUser = await getUser({ okta_id: oktaId });
 
     // `result` is Okta's raw lifecycle response — may carry activationUrl/activationToken/resetPasswordUrl
     const result = data && typeof data === 'object' && Object.keys(data).length ? data : null;
-    return { ok: true, action, user: refreshed || data, result };
+    return { ok: true, action, user: refreshed || data, result, localUser };
   });
 
   // POST /:oktaId/deactivate — deactivate user
@@ -276,8 +252,10 @@ export default async function userRoutes(fastify) {
       return reply.status(response.status).send({ error: 'Downstream API error', details: data });
     }
 
-    await db('users').where({ okta_id: oktaId }).update({ status: 'DEPROVISIONED' });
-    return { ok: true, action: 'deactivate', user: data };
+    const refreshed = await refreshFromOkta(request, oktaId);
+    if (!refreshed) await saveUser({ okta_id: oktaId }, { status: 'DEPROVISIONED' });
+    const localUser = await getUser({ okta_id: oktaId });
+    return { ok: true, action: 'deactivate', user: refreshed || data, localUser };
   });
 
   // DELETE /:oktaId — delete user (must be deactivated first)
@@ -292,7 +270,11 @@ export default async function userRoutes(fastify) {
       return reply.status(response.status).send({ error: 'Downstream API error', details: data });
     }
 
-    await db('users').where({ okta_id: oktaId }).del();
-    return { ok: true, action: 'delete' };
+    // A row still linked to a SCIM user outlives the Okta user: unlink it instead of deleting it
+    const row = await db('users').where({ okta_id: oktaId }).first();
+    let localUser = null;
+    if (row?.scim_id) localUser = await saveUser({ id: row.id }, OKTA_UNLINK);
+    else if (row) await db('users').where({ id: row.id }).del();
+    return { ok: true, action: 'delete', localUser, localUserId: row?.id ?? null };
   });
 }

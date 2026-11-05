@@ -1,7 +1,7 @@
 // All attributes for one user: the full Okta user object (when it exists in Okta), the SCIM
 // resource (when it came from a SCIM server) and the local DB row.
 // `user` is the local row the node was created with; everything is re-fetched so the view is current.
-const ViewUserContent = ({ onClose, user }) => {
+const ViewUserContent = ({ onClose, onUserChanged, user }) => {
     const [local, setLocal] = React.useState(null);
     const [okta, setOkta] = React.useState(null);   // Okta user object | error response
     const [scim, setScim] = React.useState(null);   // SCIM user resource | error response
@@ -13,7 +13,8 @@ const ViewUserContent = ({ onClose, user }) => {
         const localRes = await api(`/api/v1/users/local/${user.id}`);
         const row = localRes.ok ? localRes.data.user : user;
         setLocal(row);
-        if (!localRes.ok) setLocalError(localRes.data);
+        if (localRes.ok) onUserChanged(row.id, row);
+        else setLocalError(localRes.data);
 
         await Promise.all([
             row.okta_id && api(`/api/v1/users/${encodeURIComponent(row.okta_id)}`)
@@ -55,7 +56,7 @@ const ViewUserContent = ({ onClose, user }) => {
                         <div>
                             <h6 className="fw-bold">Local database record</h6>
                             {localError && <ApiError data={localError} />}
-                            {local && <AttributeTable rows={Object.entries(local)} />}
+                            {local && <AttributeTable rows={flattenObject(local)} />}
                         </div>
                     </>
                 )}

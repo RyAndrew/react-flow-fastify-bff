@@ -6,3 +6,10 @@ const StatusBadge = ({ status }) => {
     };
     return <span className={`badge bg-${colors[status] || 'dark'}`}>{status}</span>;
 };
+
+// SCIM `active` of a linked user (null: not known yet)
+const ScimActiveBadge = ({ active }) => (
+    active === null || active === undefined
+        ? <span className="badge bg-light text-dark border">SCIM</span>
+        : <span className={`badge ${active ? 'bg-success' : 'bg-secondary'}`}>SCIM {active ? 'active' : 'inactive'}</span>
+);

@@ -1,6 +1,8 @@
 // SCIM operations for one local user, run in place from a user node or Read Users.
 // Finds the user on the chosen server (stored scim_id, else userName = login/email),
 // then offers Get / Patch / Set Password / Activate-Deactivate / Delete, or Create if not found.
+// The local row is read from the DB on open and after every write (the BFF updates it), so the
+// create payload is built from what is stored, and the canvas node is given the new row.
 const SCIM_USER_OPS = [
     { key: 'get',      label: 'Get',          color: 'info' },
     { key: 'patch',    label: 'Patch',        color: 'secondary' },
@@ -9,9 +11,11 @@ const SCIM_USER_OPS = [
     { key: 'delete',   label: 'Delete',       color: 'danger' },
 ];
 
-const ScimUserContent = ({ onClose, onOpenScim, user }) => {
+const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser }) => {
+    const [user, setUser] = React.useState(null);              // local users row, from the DB
+    const [userError, setUserError] = React.useState(null);
     const [servers, setServers] = React.useState([]);
-    const [serverId, setServerId] = React.useState(user.scim_server_id ? String(user.scim_server_id) : '');
+    const [serverId, setServerId] = React.useState(initialUser.scim_server_id ? String(initialUser.scim_server_id) : '');
     const [resolving, setResolving] = React.useState(false);
     const [scimUser, setScimUser] = React.useState(null);   // SCIM resource, or null when not found
     const [resolveError, setResolveError] = React.useState(null);
@@ -23,9 +27,9 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
     const [running, setRunning] = React.useState(false);
     const [result, setResult] = React.useState(null);       // { ok, status, data }
     const [createStatus, setCreateStatus] = React.useState(DEFAULT_CREATE_STATUS.scim);
-    const [linkNotice, setLinkNotice] = React.useState(null); // after create: error from linking the local row
 
     React.useEffect(() => {
+        fetchLocalUser(initialUser.id).then(row => (row ? setUser(row) : setUserError({ error: `Local user ${initialUser.id} not found` })));
         api('/api/v1/scim-servers').then(({ data }) => {
             const list = data.servers || [];
             setServers(list);
@@ -33,11 +37,18 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
         });
     }, []);
 
-    const userName = user.login || user.email;
-    const createPerson = React.useMemo(() => ({ firstName: user.first_name || '', lastName: user.last_name || '', email: user.email, login: userName }), [user]);
+    // After a write the BFF has updated the row it reports: re-read it and pass it to the canvas
+    const reloadUser = async (localUserId) => {
+        if (!localUserId) return;
+        const row = await fetchLocalUser(localUserId);
+        if (row) { setUser(row); onUserChanged(row.id, row); }
+    };
+
+    const userName = user ? (user.login || user.email) : '';
+    const createPerson = React.useMemo(() => (user ? personFromRow(user) : null), [user]);
 
     const resolve = async (sid = serverId) => {
-        if (!sid) return;
+        if (!sid || !user) return;
         setResolving(true); setResolveError(null); setScimUser(null);
         let res;
         if (user.scim_id && String(user.scim_server_id) === String(sid)) {
@@ -54,7 +65,9 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
         setResolving(false);
     };
 
-    React.useEffect(() => { setResult(null); setOp('get'); resolve(serverId); }, [serverId]);
+    // Resolve once the row is loaded and whenever the server changes (not on every row reload)
+    const userLoaded = !!user;
+    React.useEffect(() => { setResult(null); setOp('get'); resolve(serverId); }, [serverId, userLoaded]);
 
     // Prefill per operation from the resolved user (not clearing result: it changes after a successful op)
     React.useEffect(() => {
@@ -63,9 +76,9 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
         if (scimUser && op === 'patch') setPayload(JSON.stringify(buildScimUserPatchFrom(scimUser, user), null, 2));
     }, [op, scimUser]);
 
-    const run = async (method, body) => {
+    // path defaults to this SCIM user (or Users for a create)
+    const run = async (method, body, path = scimUser ? `Users/${encodeURIComponent(scimUser.id)}` : 'Users') => {
         setRunning(true); setResult(null);
-        const path = scimUser ? `Users/${encodeURIComponent(scimUser.id)}` : 'Users';
         let res;
         try { res = await scimRequest(serverId, method, path, body); }
         catch (e) { res = { ok: false, status: 0, data: e.message || 'Request failed' }; }
@@ -75,23 +88,18 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
         if (method === 'DELETE') setScimUser(null);
         else if (res.data?.id) setScimUser(res.data);   // POST/PATCH return the updated resource
         else resolve();                                  // 204 from PATCH: re-read
+        await reloadUser(res.localUserId);
         return res;
     };
 
-    const runPayload = (method) => {
+    const runPayload = (method, path) => {
         let body;
         try { body = JSON.parse(payload); } catch { setResult({ ok: false, data: 'Invalid JSON payload' }); return; }
-        return run(method, body);
+        return run(method, body, path);
     };
 
-    // Create, then link this local row to the new SCIM user so later lookups use its id, not userName
-    const runCreate = async () => {
-        setLinkNotice(null);
-        const res = await runPayload('POST');
-        if (!res?.ok || !res.data?.id) return;
-        const link = await scimRequest(serverId, 'POST', `Users/${encodeURIComponent(res.data.id)}/import?localId=${user.id}`);
-        if (!link.ok) setLinkNotice(link.data);
-    };
+    // Create, linked to this local row so later lookups use the SCIM id, not userName
+    const runCreate = () => runPayload('POST', `Users?localId=${encodeURIComponent(user.id)}`);
 
     const runPassword = () => {
         if (!password) { setResult({ ok: false, data: 'Please enter a new password' }); return; }
@@ -103,6 +111,9 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
 
     const isActive = scimUser?.active !== false;
     const scimRows = scimUser ? flattenObject(scimUser).filter(([k]) => k !== 'meta.location') : [];
+
+    if (userError) return <div className="modal-body"><ApiError data={userError} /></div>;
+    if (!user) return <div className="modal-body text-center py-3"><div className="spinner-border spinner-border-sm text-primary" /></div>;
 
     return (
         <>
@@ -195,7 +206,6 @@ const ScimUserContent = ({ onClose, onOpenScim, user }) => {
                                 {result.status === 204 && <span className="text-muted fw-normal"> — no content</span>}
                             </div>
                         ) : <ApiError data={result.data} />}
-                        {linkNotice && <div className="mb-1"><span className="small text-warning">⚠ Created, but linking the local user failed:</span><ApiError data={linkNotice} compact /></div>}
                         {result.ok && result.data && <pre className="json-pre">{fmtJson(result.data)}</pre>}
                     </div>
                 )}

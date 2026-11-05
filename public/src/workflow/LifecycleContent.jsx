@@ -22,7 +22,7 @@ const CopyField = ({ label, value }) => {
     );
 };
 
-const LifecycleContent = ({ onClose, initialUserId }) => {
+const LifecycleContent = ({ onClose, initialUserId, onUserChanged }) => {
     const [users, setUsers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
     const [selectedId, setSelectedId] = React.useState(initialUserId || '');
@@ -47,6 +47,7 @@ const LifecycleContent = ({ onClose, initialUserId }) => {
         setRunning(null);
         if (ok) {
             setResult({ action, user: data.user, links: data.result });
+            if (data.localUser) onUserChanged(data.localUser.id, data.localUser);
             loadUsers();
         } else {
             setError(data);

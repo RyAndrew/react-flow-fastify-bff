@@ -1,4 +1,4 @@
-const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowUser, onGoToCanvas, onViewLogs }) => {
+const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowUser, onUserChanged, onGoToCanvas, onViewLogs }) => {
     const [servers, setServers] = React.useState([]);
     const [showServerMgr, setShowServerMgr] = React.useState(false);
     const [resourceType, setResourceType] = React.useState('Users');
@@ -12,7 +12,7 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
     const [response, setResponse] = React.useState(null);
     const [httpStatus, setHttpStatus] = React.useState(null);
     const [error, setError] = React.useState(null);
-    const [canvasNotice, setCanvasNotice] = React.useState(null); // after a SCIM create: 'running' | 'done' | error response
+    const [canvasNotice, setCanvasNotice] = React.useState(null); // 'done' after a SCIM create saved to the DB and the canvas
 
     // Workflow user picker state (used when preset.requiresUser)
     const [workflowUsers, setWorkflowUsers] = React.useState([]);
@@ -109,7 +109,7 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
         value: String(u.id),
         label: `${u.first_name} ${u.last_name} (${u.login || u.email})${u.scim_id ? ' — already linked to SCIM' : ''}`,
         disabled: !!u.scim_id,
-        person: { firstName: u.first_name || '', lastName: u.last_name || '', email: u.email, login: u.login || u.email },
+        person: personFromRow(u),
     })), [localUsers]);
 
     // Look up SCIM user by local user's email/login when user is picked
@@ -150,6 +150,8 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
             qs.set('count', count || '10');
             return `${base}?${qs.toString()}`;
         }
+        // A create prefilled from a local user is linked to that row by the BFF
+        if (isUserCreate && createPrefillId) return `${base}?localId=${encodeURIComponent(createPrefillId)}`;
         return base;
     };
 
@@ -184,9 +186,12 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
         try {
             const res = await fetch(url, opts);
             setHttpStatus(res.status);
+            // User writes also update the local row (the BFF reports which one): re-read it from the DB
+            const localUserId = resourceType === 'Users' ? res.headers.get('X-Local-User-Id') : null;
             if (res.status === 204) {
                 setResponse({ message: isSetPassword ? '204 No Content — password updated' : '204 No Content — resource deleted' });
                 if (isSetPassword) clearPasswordFields();
+                await applyLocalUser(localUserId);
                 setLoading(false); return;
             }
             const text = await res.text();
@@ -194,23 +199,20 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
             if (res.ok && isSetPassword) clearPasswordFields();
             if (res.ok) setResponse(data);
             else setError(typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data));
-            if (res.ok && action === 'create' && resourceType === 'Users' && data?.id) addCreatedUserToCanvas(data.id);
+            if (res.ok) await applyLocalUser(localUserId);
         } catch (e) {
             setError(e.message || 'Request failed');
         }
         setLoading(false);
     };
 
-    // Like the Create User node: save the new SCIM user to the local DB (linked to the prefill user, if any) and add it to the canvas
-    const addCreatedUserToCanvas = async (scimId) => {
-        setCanvasNotice('running');
-        const qs = createPrefillId ? `?localId=${encodeURIComponent(createPrefillId)}` : '';
-        const { ok, data } = await api(`/api/v1/scim/Users/${encodeURIComponent(scimId)}/import${qs}`, {
-            method: 'POST',
-            headers: { 'X-Scim-Server-Id': serverId },
-        });
-        if (ok) { onShowUser(data.user); setCanvasNotice('done'); }
-        else setCanvasNotice(data);
+    // Like the Create User node, a created user is added to the canvas; any other write refreshes its node
+    const applyLocalUser = async (localUserId) => {
+        if (!localUserId) return;
+        const row = await fetchLocalUser(localUserId);
+        if (!row) return;
+        if (isUserCreate) { onShowUser(row); setCanvasNotice('done'); }
+        else onUserChanged(row.id, row);
     };
 
     const resetResult = () => { setResponse(null); setError(null); setHttpStatus(null); setCanvasNotice(null); };
@@ -413,14 +415,12 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
                         {!loading && response !== null && (
                             <div>
                                 <div className="text-success fw-bold small mb-1">&#10003; Success</div>
-                                {canvasNotice === 'running' && <div className="small text-muted mb-2"><span className="spinner-border spinner-border-sm me-1" />Saving to DB…</div>}
                                 {canvasNotice === 'done' && (
                                     <div className="small text-success mb-2">
                                         &#10003; Saved to DB and added to the canvas
                                         <button className="btn btn-link btn-sm py-0" onClick={onGoToCanvas}>Go to canvas →</button>
                                     </div>
                                 )}
-                                {canvasNotice && typeof canvasNotice === 'object' && <ApiError data={canvasNotice} compact />}
                                 {resourceType === 'Users' && <ScimUserResults response={response} serverId={serverId} onShowUser={onShowUser} onGoToCanvas={onGoToCanvas} />}
                                 <pre className="json-pre" style={{ maxHeight: '65vh' }}>{fmtJson(response)}</pre>
                             </div>

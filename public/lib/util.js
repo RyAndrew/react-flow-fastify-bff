@@ -9,6 +9,9 @@ const apiPost = (url, body) => api(url, {
     body: JSON.stringify(body),
 });
 
+// One row from the local users table (the source of truth for a user), or null
+const fetchLocalUser = (id) => api(`/api/v1/users/local/${encodeURIComponent(id)}`).then(({ ok, data }) => (ok ? data.user : null));
+
 // Nested object → [['profile.firstName', 'Jane'], ['emails.0.value', 'j@x.com'], ...]; arrays of primitives are joined
 const flattenObject = (obj, prefix = '') => Object.entries(obj || {}).flatMap(([k, v]) => {
     const key = prefix ? `${prefix}.${k}` : k;
@@ -16,6 +19,13 @@ const flattenObject = (obj, prefix = '') => Object.entries(obj || {}).flatMap(([
     if (v && typeof v === 'object' && !primitiveArray) return flattenObject(v, key);
     return [[key, primitiveArray ? v.join(', ') : v]];
 });
+
+// ISO or SQLite (UTC 'YYYY-MM-DD HH:MM:SS') timestamp → local date/time, '—' when empty
+const fmtTime = (v) => {
+    if (!v) return '—';
+    const d = new Date(/^\d{4}-\d\d-\d\d \d/.test(v) ? `${v.replace(' ', 'T')}Z` : v);
+    return isNaN(d) ? String(v) : d.toLocaleString();
+};
 
 const fmtJson =(v) => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); } catch { return String(v); } };
 

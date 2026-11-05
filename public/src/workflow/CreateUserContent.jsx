@@ -17,7 +17,8 @@ const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
         value: String(u.id),
         label: `${u.first_name} ${u.last_name} (${u.login || u.email})${u.okta_id ? ' — already in Okta' : ''}`,
         disabled: !!u.okta_id,
-        person: { firstName: u.first_name || '', lastName: u.last_name || '', email: u.email, login: u.login?.includes('@') ? u.login : u.email },
+        // Okta's login must be email-shaped: a SCIM userName that isn't falls back to the email
+        person: { ...personFromRow(u), login: u.login?.includes('@') ? u.login : u.email },
     })), [scimImports]);
 
     const statusQuery = USER_CREATE_STATUSES.okta.find(s => s.value === userStatus).query;

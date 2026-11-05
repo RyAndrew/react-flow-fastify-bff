@@ -3,6 +3,26 @@
 
 const USER_TEMPLATE_TARGETS = { okta: 'Okta', scim: 'SCIM' };
 
+// Domain of a generated UPN ({{login}} for a random person: {{sam}}@UPN_DOMAIN)
+const UPN_DOMAIN = 'corp.example.com';
+
+// Profile attributes of a local user (users.profile, see PROFILE_KEYS in lib/user-store.js), each a token
+const USER_PROFILE_TOKENS = [
+    'displayName', 'nickName', 'title', 'userType', 'preferredLanguage',
+    'department', 'employeeNumber', 'costCenter', 'organization', 'division',
+    'mobilePhone', 'primaryPhone',
+    'streetAddress', 'city', 'state', 'zipCode', 'countryCode',
+];
+
+// Local users row → template person: the core columns plus every stored profile attribute
+const personFromRow = (row) => ({
+    ...(row.profile || {}),
+    firstName: row.first_name || '',
+    lastName: row.last_name || '',
+    email: row.email,
+    login: row.login || row.email,
+});
+
 // Initial status per target. Okta: query params for POST /users/create, password → credentials.password.value.
 // SCIM: sets `active` and adds/removes the top-level `password` (AD rejects an enabled account with no password).
 const USER_CREATE_STATUSES = {
@@ -41,16 +61,21 @@ const slugify = (v) => String(v).toLowerCase().replace(/[^a-z0-9._-]/g, '');
 const TEMPLATE_TOKENS = [
     {
         group: 'Person',
-        note: 'From the random name generator, or from the user picked in "Prefill from".',
+        note: 'From the random name generator, or from the local user (a prefill pick, or the user being pushed to SCIM).',
         tokens: [
             { token: '{{firstName}}',  desc: 'Given name' },
-            { token: '{{middleName}}', desc: 'Middle name (empty when prefilled from a user)' },
+            { token: '{{middleName}}', desc: 'Middle name' },
             { token: '{{lastName}}',   desc: 'Surname' },
-            { token: '{{gender}}',     desc: 'Gender from the random name generator (empty when prefilled)' },
-            { token: '{{email}}',      desc: 'Prefilled user\'s email, else firstname.lastname+{{suffix}}@example.com' },
-            { token: '{{login}}',      desc: 'Prefilled user\'s login, else the same as {{email}}' },
-            { token: '{{sam}}',        desc: 'AD-style account name: first initial + surname + {{suffix}}, at most 20 characters' },
+            { token: '{{gender}}',     desc: 'Gender from the random name generator (empty for a local user)' },
+            { token: '{{email}}',      desc: 'The user\'s email, else firstname.lastname+{{suffix}}@example.com' },
+            { token: '{{login}}',      desc: `The user's login (UPN), else {{sam}}@${UPN_DOMAIN}. Use it for both the Okta login and the SCIM userName.` },
+            { token: '{{sam}}',        desc: 'AD-safe account name: first initial + surname + {{suffix}}, a-z 0-9 only, at most 20 characters' },
         ],
+    },
+    {
+        group: 'Local user profile',
+        note: 'Stored attributes of the local user; empty for a random person. {{displayName}} falls back to "firstName lastName".',
+        tokens: USER_PROFILE_TOKENS.map(k => ({ token: `{{${k}}}`, desc: 'Profile attribute' })),
     },
     {
         group: 'Generated once per render',
@@ -98,18 +123,22 @@ const MODIFIERS = {
     trunc:   (v, n) => v.slice(0, Number(n) || v.length),
 };
 
-// person: { firstName, middleName?, lastName, gender?, email?, login? }
+// person: { firstName, middleName?, lastName, gender?, email?, login?, ...profile attributes }
 const buildTokenContext = (person) => {
     const firstName = person.firstName || '';
     const lastName = person.lastName || '';
     const suffix = randomChars(LOWER_ALNUM, 5);
     const email = person.email || `${slugify(firstName)}.${slugify(lastName)}+${suffix}@example.com`;
+    // Valid as a sAMAccountName (≤ 20 chars, no special characters), so a UPN built from it is too
     const sam = `${firstName.slice(0, 1)}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15) + suffix;
+    const profile = Object.fromEntries(USER_PROFILE_TOKENS.map(k => [k, person[k] == null ? '' : String(person[k])]));
     return {
+        ...profile,
+        displayName: profile.displayName || `${firstName} ${lastName}`.trim(),
         firstName, lastName, email, sam, suffix,
         middleName: person.middleName || '',
         gender: person.gender || '',
-        login: person.login || email,
+        login: person.login || `${sam}@${UPN_DOMAIN}`,
         password: generatePassword(16),
         uuid: crypto.randomUUID(),
         timestamp: String(Date.now()),
@@ -141,11 +170,26 @@ const renderUserTemplate = (body, person) => {
     return out;
 };
 
-// Render + parse + apply status → pretty JSON string. Throws with a readable message on bad templates.
+// Drops what a token left empty, so a template can map attributes a user may not have: empty strings,
+// then objects/arrays left empty, and multi-valued entries (phone, address) left with only type/primary/display.
+const MULTI_VALUE_META = ['type', 'primary', 'display'];
+const isEmptyValue = (v) => v === '' || (Array.isArray(v) ? !v.length : !!v && typeof v === 'object' && !Object.keys(v).length);
+const pruneEmpty = (v) => {
+    if (Array.isArray(v)) {
+        return v.map(pruneEmpty).filter(x => !isEmptyValue(x)
+            && !(x && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).every(k => MULTI_VALUE_META.includes(k))));
+    }
+    if (v && typeof v === 'object') {
+        return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, pruneEmpty(x)]).filter(([, x]) => !isEmptyValue(x)));
+    }
+    return v;
+};
+
+// Render + parse + drop empty values + apply status → pretty JSON string. Throws with a readable message on bad templates.
 const buildUserPayload = (template, person, target, statusValue) => {
     const rendered = renderUserTemplate(template.body, person);
     let parsed;
     try { parsed = JSON.parse(rendered); }
     catch (e) { throw new Error(`Template "${template.name}" is not valid JSON after rendering: ${e.message}`); }
-    return JSON.stringify(applyUserStatus(target, parsed, statusValue), null, 2);
+    return JSON.stringify(applyUserStatus(target, pruneEmpty(parsed), statusValue), null, 2);
 };

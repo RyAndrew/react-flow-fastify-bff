@@ -1,5 +1,5 @@
 // Deactivate + Delete
-const DeleteContent = ({ onClose, initialUserId }) => {
+const DeleteContent = ({ onClose, initialUserId, onUserChanged }) => {
     const [users, setUsers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
     const [selectedId, setSelectedId] = React.useState(initialUserId || '');
@@ -17,7 +17,11 @@ const DeleteContent = ({ onClose, initialUserId }) => {
         setRunning('deactivate'); setResult(null); setError(null);
         const { ok, data } = await apiPost(`/api/v1/users/${selectedId}/deactivate`, {});
         setRunning(null);
-        if (ok) { setResult({ action: 'deactivate', data }); loadUsers(); }
+        if (ok) {
+            setResult({ action: 'deactivate', data });
+            if (data.localUser) onUserChanged(data.localUser.id, data.localUser);
+            loadUsers();
+        }
         else { setError(data); }
     };
 
@@ -26,7 +30,12 @@ const DeleteContent = ({ onClose, initialUserId }) => {
         setRunning('delete'); setResult(null); setError(null);
         const { ok, data } = await api(`/api/v1/users/${selectedId}`, { method: 'DELETE' });
         setRunning(null);
-        if (ok) { setResult({ action: 'delete', data }); setSelectedId(''); loadUsers(); }
+        if (ok) {
+            // localUser is the row kept (still linked to SCIM, Okta link cleared); null when the row was deleted
+            setResult({ action: 'delete', data, kept: !!data.localUser });
+            if (data.localUserId) onUserChanged(data.localUserId, data.localUser);
+            setSelectedId(''); loadUsers();
+        }
         else { setError(data); }
     };
 
@@ -50,6 +59,7 @@ const DeleteContent = ({ onClose, initialUserId }) => {
                     <p className="small text-muted">Current status: <StatusBadge status={selectedUser.status} /></p>
                 )}
                 {result && <div className="text-success fw-bold">&#10003; {result.action} completed</div>}
+                {result?.kept && <p className="small text-muted mt-1 mb-0">The local record is kept: it is still linked to a SCIM user.</p>}
                 {error && <ApiError data={error} />}
             </div>
             <div className="modal-footer">

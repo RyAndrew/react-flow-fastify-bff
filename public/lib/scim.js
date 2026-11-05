@@ -25,13 +25,17 @@ const buildScimUserPatch = ({ givenName, familyName, email, address }) => ({
 
 // Calls the BFF SCIM proxy (/api/v1/scim/{path}) for one server. Handles 204 and non-JSON bodies;
 // on failure `data` is { error, details } so it can go straight to <ApiError>.
+// localUserId: the local users row the BFF updated for this write (X-Local-User-Id), else null.
 const scimRequest = async (serverId, method, path, body) => {
     const opts = { credentials: 'same-origin', method, headers: { 'X-Scim-Server-Id': String(serverId) } };
     if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     const res = await fetch(`/api/v1/scim/${path}`, opts);
     const text = res.status === 204 ? '' : await res.text();
     let data; try { data = JSON.parse(text); } catch { data = text || null; }
-    return { ok: res.ok, status: res.status, data: res.ok ? data : { error: `SCIM server returned ${res.status}`, details: data } };
+    return {
+        ok: res.ok, status: res.status, localUserId: res.headers.get('X-Local-User-Id'),
+        data: res.ok ? data : { error: `SCIM server returned ${res.status}`, details: data },
+    };
 };
 
 // buildScimUserPatch prefilled from an existing SCIM user's current values (falls back to a local users row)

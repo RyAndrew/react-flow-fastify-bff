@@ -5,26 +5,35 @@ const UPDATE_TASKS = [
     { key: 'group', label: 'Add to Group' },
 ];
 
-const UpdateUserContent = ({ onClose, initialUserId }) => {
+const UpdateUserContent = ({ onClose, initialUserId, onUserChanged }) => {
     const [users, setUsers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
     const [selectedId, setSelectedId] = React.useState(initialUserId || '');
     const [activeTask, setActiveTask] = React.useState('profile');
 
-    React.useEffect(() => {
-        api('/api/v1/users').then(({ data }) => { setUsers(data.users || []); setLoading(false); });
-    }, []);
+    const loadUsers = () => api('/api/v1/users').then(({ data }) => { setUsers(data.users || []); setLoading(false); });
+    React.useEffect(() => { loadUsers(); }, []);
 
     const selectedUser = users.find(u => u.okta_id === selectedId);
 
-    const profilePayload = selectedUser ? JSON.stringify({
+    // Starts from the stored row: core columns + every profile attribute, in Okta's profile names.
+    // Rebuilt only when another user is picked: PayloadTask resets (hiding its result) when this changes.
+    const profilePayload = React.useMemo(() => selectedUser ? JSON.stringify({
         profile: {
             firstName: selectedUser.first_name,
             lastName: selectedUser.last_name,
             email: selectedUser.email,
-            mobilePhone: '555-555-0100',
+            login: selectedUser.login,
+            ...selectedUser.profile,
         }
-    }, null, 2) : '';
+    }, null, 2) : '', [selectedId, loading]);
+
+    // The BFF saved Okta's response to the local row: show it on the canvas and in the picker
+    const handleSaved = (data) => {
+        if (!data.localUser) return;
+        onUserChanged(data.localUser.id, data.localUser);
+        setUsers(us => us.map(u => u.id === data.localUser.id ? data.localUser : u));
+    };
 
     const passwordPayload = JSON.stringify({
         credentials: {
@@ -50,14 +59,14 @@ const UpdateUserContent = ({ onClose, initialUserId }) => {
                             <PayloadTask
                                 url={`/api/v1/users/${selectedId}/update`}
                                 method="POST" buttonLabel="Update Profile" buttonColor="primary"
-                                defaultPayload={profilePayload}
+                                defaultPayload={profilePayload} onSuccess={handleSaved}
                             />
                         )}
                         {activeTask === 'password' && (
                             <PayloadTask
                                 url={`/api/v1/users/${selectedId}/update`}
                                 method="POST" buttonLabel="Set Password" buttonColor="warning"
-                                defaultPayload={passwordPayload}
+                                defaultPayload={passwordPayload} onSuccess={handleSaved}
                             />
                         )}
                         {activeTask === 'factor' && (
