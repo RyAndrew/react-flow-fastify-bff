@@ -50,7 +50,7 @@ const App = () => {
         { id: 'import',  type: 'custom', data: { label: 'Import User',     onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 500, y: 50 },  className: 'import' },
         { id: 'read',   type: 'custom', data: { label: '2. Read Users',   onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 150 }, className: 'read' },
         { id: 'update',  type: 'custom', data: { label: '3. Update User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 250 }, className: 'update' },
-        { id: 'suspend', type: 'custom', data: { label: '4. Suspend User', onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 350 }, className: 'suspend' },
+        { id: 'lifecycle', type: 'custom', data: { label: '4. Lifecycle', onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 350 }, className: 'lifecycle' },
         { id: 'delete',  type: 'custom', data: { label: '5. Delete User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 450 }, className: 'delete' },
     ];
 
