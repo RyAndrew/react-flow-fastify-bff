@@ -29,10 +29,10 @@ const factorDisplayName = (f) => {
 const LIFECYCLE_ACTIONS = [
     { action: 'suspend', label: 'Suspend', color: 'warning' },
     { action: 'unsuspend', label: 'Unsuspend', color: 'info' },
-    { action: 'activate', label: 'Activate', color: 'success' },
-    { action: 'reactivate', label: 'Reactivate', color: 'success' },
+    { action: 'activate', label: 'Activate', color: 'success', sendsEmail: true },
+    { action: 'reactivate', label: 'Reactivate', color: 'success', sendsEmail: true },
     { action: 'unlock', label: 'Unlock', color: 'info' },
-    { action: 'reset_password', label: 'Reset Password', color: 'warning' },
+    { action: 'reset_password', label: 'Reset Password', color: 'warning', sendsEmail: true },
     { action: 'expire_password', label: 'Expire Password', color: 'warning' },
     { action: 'reset_factors', label: 'Reset Factors', color: 'secondary' },
 ];

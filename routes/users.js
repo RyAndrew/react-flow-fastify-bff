@@ -234,10 +234,15 @@ export default async function userRoutes(fastify) {
   });
 
   // POST /:oktaId/lifecycle/:action — lifecycle transitions
+  // ?sendEmail=false — for activate / reactivate / reset_password: Okta skips its email and instead
+  //   returns the link in the response (activationUrl + activationToken, or resetPasswordUrl)
   fastify.post('/:oktaId/lifecycle/:action', async (request, reply) => {
     const { oktaId, action } = request.params;
+    const { sendEmail } = request.query;
 
-    const url = `${downstreamApiUrl}/api/v1/users/${oktaId}/lifecycle/${action}`;
+    const qs = new URLSearchParams();
+    if (sendEmail === 'true' || sendEmail === 'false') qs.set('sendEmail', sendEmail);
+    const url = `${downstreamApiUrl}/api/v1/users/${oktaId}/lifecycle/${action}${qs.toString() ? `?${qs}` : ''}`;
     const { response, data } = await callDownstream(request, 'POST', url, null);
 
     if (!response.ok) {
@@ -245,14 +250,18 @@ export default async function userRoutes(fastify) {
       return reply.status(response.status).send({ error: 'Downstream API error', details: data });
     }
 
-    // Refresh user status from downstream
+    // Refresh user status from downstream; keep the lifecycle call as the audit-logged downstream record
+    const actionDownstream = request.downstream;
     const statusUrl = `${downstreamApiUrl}/api/v1/users/${oktaId}`;
     const { data: refreshed } = await callDownstream(request, 'GET', statusUrl, null);
+    request.downstream = actionDownstream;
     if (refreshed?.status) {
       await db('users').where({ okta_id: oktaId }).update({ status: refreshed.status });
     }
 
-    return { ok: true, action, user: refreshed || data };
+    // `result` is Okta's raw lifecycle response — may carry activationUrl/activationToken/resetPasswordUrl
+    const result = data && typeof data === 'object' && Object.keys(data).length ? data : null;
+    return { ok: true, action, user: refreshed || data, result };
   });
 
   // POST /:oktaId/deactivate — deactivate user
