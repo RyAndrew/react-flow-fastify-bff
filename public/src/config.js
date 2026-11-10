@@ -20,9 +20,9 @@ const initialEdges = [
 
 // Modal type → title + content mapping
 const MODAL_CONFIG = {
-    // TODO(phase 3): CreateIdentityContent; until then the identity step reuses the Okta create form
-    identity:       { title: 'Create Identity',           size: 'modal-lg', Content: CreateUserContent },
-    credential:     { title: 'Create Credential — Okta',  size: 'modal-lg', Content: CreateUserContent },
+    identity:       { title: 'Create Identity',           size: 'modal-lg', Content: CreateIdentityContent },
+    edit_identity:  { title: 'Edit Identity',             size: 'modal-lg', Content: EditIdentityContent },
+    credential:     { title: 'Create Credential — Okta',  size: 'modal-lg', Content: CreateCredentialContent },
     import:         { title: 'Import User from Okta',     size: 'modal-xl', Content: ImportUserContent },
     read:           { title: 'Users',                     size: 'modal-xl', Content: ReadUsersContent },
     update:         { title: 'Update User',               size: 'modal-lg', Content: UpdateUserContent },

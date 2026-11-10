@@ -1,28 +1,16 @@
-const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
+// Create Credential: an Okta user for an identity, either a stored one (picked, or the node it was opened
+// from) or a new one typed inline. The payload comes from the identity through the shared attribute map.
+const CreateCredentialContent = ({ onClose, onShowUser, initialIdentityId }) => {
     const [payload, setPayload] = React.useState('');
     const [status, setStatus] = React.useState('idle');
     const [progress, setProgress] = React.useState(0);
     const [result, setResult] = React.useState(null);
     const [error, setError] = React.useState(null);
-    const [scimImports, setScimImports] = React.useState([]);
-    const [importedId, setImportedId] = React.useState(initialImportedId ? String(initialImportedId) : '');
+    const [identityId, setIdentityId] = React.useState(initialIdentityId ? String(initialIdentityId) : '');
     const [userStatus, setUserStatus] = React.useState(DEFAULT_CREATE_STATUS.okta);
 
-    React.useEffect(() => {
-        api('/api/v1/users?source=scim').then(({ data }) => setScimImports(data.users || []));
-    }, []);
-
-    // SCIM imports to prefill from; on create the server links that row to the new Okta user
-    const prefillOptions = React.useMemo(() => scimImports.map(u => ({
-        value: String(u.id),
-        label: `${u.first_name} ${u.last_name} (${u.login || u.email})${u.okta_id ? ' — already in Okta' : ''}`,
-        disabled: !!u.okta_id,
-        // Okta's login must be email-shaped: a SCIM userName that isn't falls back to the email
-        person: { ...personFromRow(u), login: u.login?.includes('@') ? u.login : u.email },
-    })), [scimImports]);
-
     const statusQuery = USER_CREATE_STATUSES.okta.find(s => s.value === userStatus).query;
-    const createQs = new URLSearchParams({ ...statusQuery, ...(importedId ? { importedId } : {}) });
+    const createQs = new URLSearchParams({ ...statusQuery, ...(identityId ? { identityId } : {}) });
     const createUrl = `/api/v1/users/create?${createQs}`;
 
     const handleCreate = async () => {
@@ -55,10 +43,8 @@ const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
                 </div>
                 {/* Kept mounted while running so a retry returns to the same payload */}
                 <div style={{ display: status === 'idle' ? '' : 'none' }}>
-                    <UserCreateForm target="okta" payload={payload} onPayloadChange={setPayload}
-                        status={userStatus} onStatusChange={setUserStatus}
-                        prefillOptions={prefillOptions} prefillLabel="Prefill from SCIM import"
-                        prefillValue={importedId} onPrefillChange={setImportedId} rows={10} />
+                    <CredentialCreateForm target="okta" identityId={identityId} onIdentityIdChange={setIdentityId}
+                        status={userStatus} onStatusChange={setUserStatus} payload={payload} onPayloadChange={setPayload} />
                     {typeof error === 'string' && <p className="text-danger mt-2 mb-0">{error}</p>}
                 </div>
                 {status === 'running' && (
@@ -72,7 +58,7 @@ const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
                 )}
                 {status === 'done' && result && (
                     <div>
-                        <div className="text-success fw-bold mb-2">&#10003; User created successfully</div>
+                        <div className="text-success fw-bold mb-2">&#10003; Okta credential created</div>
                         <pre className="json-pre">{fmtJson(result)}</pre>
                     </div>
                 )}
@@ -85,7 +71,7 @@ const CreateUserContent = ({ onClose, onShowUser, initialImportedId }) => {
                 )}
             </div>
             <div className="modal-footer">
-                {status === 'idle' && <button className="btn btn-success" onClick={handleCreate}>Create User</button>}
+                {status === 'idle' && <button className="btn btn-success" disabled={!payload} onClick={handleCreate}>Create Okta Credential</button>}
                 {status === 'error' && <button className="btn btn-outline-primary" onClick={() => { setStatus('idle'); setError(null); }}>Edit &amp; Retry</button>}
                 <button className="btn btn-secondary" onClick={onClose}>Close</button>
             </div>

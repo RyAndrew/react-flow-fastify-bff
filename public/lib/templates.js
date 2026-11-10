@@ -1,30 +1,20 @@
-// Create-user payload templates: {{token}} rendering, token docs for the help modal, and initial-status tables.
-// Templates are stored in SQLite (/api/v1/templates) as JSON text with tokens inside.
-
-const USER_TEMPLATE_TARGETS = { okta: 'Okta', scim: 'SCIM' };
+// Identity templates: {{token}} rendering into a flat identity (canonical attribute names, see
+// lib/attribute-map.js), token docs for the help modal, and the initial-status tables a credential is
+// created with. Templates are stored in SQLite (/api/v1/templates) as JSON text with tokens inside.
+// An identity is the same for every system: the BFF maps it to the Okta or SCIM payload
+// (/api/v1/identities/payload/:target), so the two never drift apart.
 
 // Domain of a generated UPN ({{login}} for a random person: {{sam}}@UPN_DOMAIN)
 const UPN_DOMAIN = 'corp.example.com';
 
-// Profile attributes of a local user (users.profile, see PROFILE_KEYS in lib/user-store.js), each a token
-const USER_PROFILE_TOKENS = [
-    'displayName', 'nickName', 'title', 'userType', 'preferredLanguage',
-    'department', 'employeeNumber', 'costCenter', 'organization', 'division',
-    'mobilePhone', 'primaryPhone',
-    'streetAddress', 'city', 'state', 'zipCode', 'countryCode',
-];
+// The identity attribute names (template keys), from the BFF; loaded once
+let identityAttributesPromise = null;
+const loadIdentityAttributes = () => (identityAttributesPromise ||= api('/api/v1/identities/attributes')
+    .then(({ ok, data }) => { if (!ok) { identityAttributesPromise = null; return []; } return data.attributes; }));
 
-// Local users row → template person: the core columns plus every stored profile attribute
-const personFromRow = (row) => ({
-    ...(row.profile || {}),
-    firstName: row.first_name || '',
-    lastName: row.last_name || '',
-    email: row.email,
-    login: row.login || row.email,
-});
-
-// Initial status per target. Okta: query params for POST /users/create, password → credentials.password.value.
-// SCIM: sets `active` and adds/removes the top-level `password` (AD rejects an enabled account with no password).
+// Initial status per credential target. Okta: query params for POST /users/create, password →
+// credentials.password.value. SCIM: sets `active` and adds/removes the top-level `password` (AD rejects
+// an enabled account with no password). Passwords belong to the credential, not the identity.
 const USER_CREATE_STATUSES = {
     okta: [
         { value: 'STAGED',           label: 'STAGED — created, not activated',                       query: { activate: 'false' } },
@@ -39,6 +29,7 @@ const USER_CREATE_STATUSES = {
     ],
 };
 const DEFAULT_CREATE_STATUS = { okta: 'PROVISIONED', scim: 'ACTIVE' };
+const CREDENTIAL_TARGETS = { okta: 'Okta', scim: 'SCIM' };
 
 // Make a parsed payload match the chosen status; an existing password value is kept
 const applyUserStatus = (target, body, statusValue) => {
@@ -61,28 +52,22 @@ const slugify = (v) => String(v).toLowerCase().replace(/[^a-z0-9._-]/g, '');
 const TEMPLATE_TOKENS = [
     {
         group: 'Person',
-        note: 'From the random name generator, or from the local user (a prefill pick, or the user being pushed to SCIM).',
+        note: 'From the random name generator.',
         tokens: [
             { token: '{{firstName}}',  desc: 'Given name' },
             { token: '{{middleName}}', desc: 'Middle name' },
             { token: '{{lastName}}',   desc: 'Surname' },
-            { token: '{{gender}}',     desc: 'Gender from the random name generator (empty for a local user)' },
-            { token: '{{email}}',      desc: 'The user\'s email, else firstname.lastname+{{suffix}}@example.com' },
-            { token: '{{login}}',      desc: `The user's login (UPN), else {{sam}}@${UPN_DOMAIN}. Use it for both the Okta login and the SCIM userName.` },
+            { token: '{{gender}}',     desc: 'Gender' },
+            { token: '{{email}}',      desc: 'firstname.lastname+{{suffix}}@example.com' },
+            { token: '{{login}}',      desc: `{{sam}}@${UPN_DOMAIN} — the UPN. The identity's login becomes both the Okta login and the SCIM userName.` },
             { token: '{{sam}}',        desc: 'AD-safe account name: first initial + surname + {{suffix}}, a-z 0-9 only, at most 20 characters' },
         ],
     },
     {
-        group: 'Local user profile',
-        note: 'Stored attributes of the local user; empty for a random person. {{displayName}} falls back to "firstName lastName".',
-        tokens: USER_PROFILE_TOKENS.map(k => ({ token: `{{${k}}}`, desc: 'Profile attribute' })),
-    },
-    {
         group: 'Generated once per render',
-        note: 'The same value everywhere it appears in one payload; a new value each time the payload is regenerated.',
+        note: 'The same value everywhere it appears in one identity; a new value each time it is regenerated.',
         tokens: [
             { token: '{{suffix}}',    desc: '5 random lowercase letters/digits, e.g. k3m9x' },
-            { token: '{{password}}',  desc: '16-character password with upper, lower, digit and symbol' },
             { token: '{{uuid}}',      desc: 'Random UUID' },
             { token: '{{timestamp}}', desc: 'Milliseconds since epoch' },
             { token: '{{date}}',      desc: 'Today as YYYY-MM-DD' },
@@ -123,23 +108,19 @@ const MODIFIERS = {
     trunc:   (v, n) => v.slice(0, Number(n) || v.length),
 };
 
-// person: { firstName, middleName?, lastName, gender?, email?, login?, ...profile attributes }
+// person: { firstName, middleName?, lastName, gender? } from the random name generator
 const buildTokenContext = (person) => {
     const firstName = person.firstName || '';
     const lastName = person.lastName || '';
     const suffix = randomChars(LOWER_ALNUM, 5);
-    const email = person.email || `${slugify(firstName)}.${slugify(lastName)}+${suffix}@example.com`;
     // Valid as a sAMAccountName (≤ 20 chars, no special characters), so a UPN built from it is too
     const sam = `${firstName.slice(0, 1)}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15) + suffix;
-    const profile = Object.fromEntries(USER_PROFILE_TOKENS.map(k => [k, person[k] == null ? '' : String(person[k])]));
     return {
-        ...profile,
-        displayName: profile.displayName || `${firstName} ${lastName}`.trim(),
-        firstName, lastName, email, sam, suffix,
+        firstName, lastName, sam, suffix,
         middleName: person.middleName || '',
         gender: person.gender || '',
-        login: person.login || `${sam}@${UPN_DOMAIN}`,
-        password: generatePassword(16),
+        email: `${slugify(firstName)}.${slugify(lastName)}+${suffix}@example.com`,
+        login: `${sam}@${UPN_DOMAIN}`,
         uuid: crypto.randomUUID(),
         timestamp: String(Date.now()),
         date: new Date().toISOString().slice(0, 10),
@@ -147,7 +128,7 @@ const buildTokenContext = (person) => {
 };
 
 // Replace {{name[:arg][|modifier[:arg]]...}} in a template body. Values are JSON-string-escaped, so tokens
-// belong inside "quoted" strings (an unquoted {{digits:N}} still yields a valid number). Throws on unknown tokens.
+// belong inside "quoted" strings. Throws on unknown tokens.
 const renderUserTemplate = (body, person) => {
     const ctx = buildTokenContext(person);
     const unknown = [];
@@ -170,26 +151,30 @@ const renderUserTemplate = (body, person) => {
     return out;
 };
 
-// Drops what a token left empty, so a template can map attributes a user may not have: empty strings,
-// then objects/arrays left empty, and multi-valued entries (phone, address) left with only type/primary/display.
-const MULTI_VALUE_META = ['type', 'primary', 'display'];
-const isEmptyValue = (v) => v === '' || (Array.isArray(v) ? !v.length : !!v && typeof v === 'object' && !Object.keys(v).length);
-const pruneEmpty = (v) => {
-    if (Array.isArray(v)) {
-        return v.map(pruneEmpty).filter(x => !isEmptyValue(x)
-            && !(x && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).every(k => MULTI_VALUE_META.includes(k))));
-    }
-    if (v && typeof v === 'object') {
-        return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, pruneEmpty(x)]).filter(([, x]) => !isEmptyValue(x)));
-    }
-    return v;
+// Checks an identity object (from a template or edited by hand): flat, string values, known keys
+// (when `attributes` is given). Empty values are dropped, so a template can list attributes a person
+// may not have. Returns attribute → string.
+const parseIdentity = (obj, attributes, what = 'Identity') => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error(`${what} must be a JSON object of attribute → value`);
+    const unknown = attributes?.length ? Object.keys(obj).filter(k => !attributes.includes(k)) : [];
+    if (unknown.length) throw new Error(`${what}: unknown attribute${unknown.length > 1 ? 's' : ''} ${unknown.join(', ')} (see ? for the list)`);
+    const nested = Object.keys(obj).filter(k => obj[k] !== null && typeof obj[k] === 'object');
+    if (nested.length) throw new Error(`${what}: ${nested.join(', ')} must be plain values, not objects`);
+    return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== null && v !== '').map(([k, v]) => [k, String(v)]));
 };
 
-// Render + parse + drop empty values + apply status → pretty JSON string. Throws with a readable message on bad templates.
-const buildUserPayload = (template, person, target, statusValue) => {
+// Render + parse → identity object. Throws with a readable message on a bad template.
+const buildIdentity = (template, person, attributes) => {
     const rendered = renderUserTemplate(template.body, person);
     let parsed;
     try { parsed = JSON.parse(rendered); }
     catch (e) { throw new Error(`Template "${template.name}" is not valid JSON after rendering: ${e.message}`); }
-    return JSON.stringify(applyUserStatus(target, pruneEmpty(parsed), statusValue), null, 2);
+    return parseIdentity(parsed, attributes, `Template "${template.name}"`);
+};
+
+// Identity → create payload for one system (from the BFF's attribute map) with the initial status applied
+const fetchCredentialPayload = async (target, source, statusValue) => {
+    const { ok, data } = await apiPost(`/api/v1/identities/payload/${target}`, source);
+    if (!ok) throw new Error(data?.error || 'Building the payload failed');
+    return applyUserStatus(target, data.payload, statusValue);
 };

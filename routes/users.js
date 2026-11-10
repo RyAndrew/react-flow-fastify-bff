@@ -88,7 +88,7 @@ export default async function userRoutes(fastify) {
   // POST /create — create an Okta credential via the downstream API + store it locally
   // ?identityId= — the local identity (row) the Okta user belongs to; its identity attributes are kept.
   //   Without it (or if that row already has an Okta user), a new row is inserted with the identity taken
-  //   from what Okta returned. ?importedId= is the old name, still accepted.
+  //   from what Okta returned.
   // ?activate= / ?nextLogin= — passed through to Okta to pick the initial status (STAGED, PROVISIONED, ACTIVE, PASSWORD_EXPIRED)
   fastify.post('/create', async (request, reply) => {
     const body = request.body;
@@ -96,7 +96,7 @@ export default async function userRoutes(fastify) {
       return reply.status(400).send({ error: 'Missing required user profile (email, firstName, lastName)' });
     }
 
-    const { identityId = request.query.importedId, activate = 'true', nextLogin } = request.query;
+    const { identityId, activate = 'true', nextLogin } = request.query;
     const qs = new URLSearchParams({ activate: activate === 'false' ? 'false' : 'true' });
     if (nextLogin === 'changePassword') qs.set('nextLogin', nextLogin);
     const url = `${downstreamApiUrl}/api/v1/users?${qs}`;

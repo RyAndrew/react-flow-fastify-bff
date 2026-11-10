@@ -27,10 +27,9 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
     const [confirmPassword, setConfirmPassword] = React.useState('');
     const [showPassword, setShowPassword] = React.useState(false);
 
-    // Create User state (template form)
+    // Create User state (identity picker + payload form)
     const [createStatus, setCreateStatus] = React.useState(DEFAULT_CREATE_STATUS.scim);
-    const [createPrefillId, setCreatePrefillId] = React.useState('');
-    const [localUsers, setLocalUsers] = React.useState([]);
+    const [createIdentityId, setCreateIdentityId] = React.useState('');
 
     const isSetPassword = action === 'setPassword';
     const isUserCreate = action === 'create' && resourceType === 'Users';
@@ -98,19 +97,8 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
         setPayload(needsPayload ? getScimDefaultPayload(resourceType, action) : '');
     }, [action, resourceType]);
 
-    // Local users (Okta-created or imported) to prefill a SCIM create from; the new SCIM user is linked to that row
-    React.useEffect(() => {
-        if (!isUserCreate) return;
-        setCreatePrefillId('');
-        api('/api/v1/users?scope=all').then(({ data }) => setLocalUsers((data.users || []).filter(u => u.source !== 'scim')));
-    }, [isUserCreate]);
-
-    const createPrefillOptions = React.useMemo(() => localUsers.map(u => ({
-        value: String(u.id),
-        label: `${u.first_name} ${u.last_name} (${u.login || u.email})${u.scim_id ? ' — already linked to SCIM' : ''}`,
-        disabled: !!u.scim_id,
-        person: personFromRow(u),
-    })), [localUsers]);
+    // A Users create starts as a new identity; picking a stored one links the new SCIM user to that row
+    React.useEffect(() => { if (isUserCreate) setCreateIdentityId(''); }, [isUserCreate]);
 
     // Look up SCIM user by local user's email/login when user is picked
     const handleWorkflowUserChange = async (oktaId) => {
@@ -150,8 +138,8 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
             qs.set('count', count || '10');
             return `${base}?${qs.toString()}`;
         }
-        // A create prefilled from a local user is linked to that row by the BFF
-        if (isUserCreate && createPrefillId) return `${base}?localId=${encodeURIComponent(createPrefillId)}`;
+        // A create for a stored identity is linked to that row by the BFF
+        if (isUserCreate && createIdentityId) return `${base}?localId=${encodeURIComponent(createIdentityId)}`;
         return base;
     };
 
@@ -369,13 +357,11 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
                             </div>
                         )}
 
-                        {/* Payload editor: Create User uses the shared template form */}
+                        {/* Payload editor: Create User builds the payload from an identity */}
                         {isUserCreate && (
                             <div className="mb-3">
-                                <UserCreateForm target="scim" payload={payload} onPayloadChange={setPayload}
-                                    status={createStatus} onStatusChange={setCreateStatus}
-                                    prefillOptions={createPrefillOptions} prefillLabel="Prefill from local user"
-                                    prefillValue={createPrefillId} onPrefillChange={setCreatePrefillId} />
+                                <CredentialCreateForm target="scim" identityId={createIdentityId} onIdentityIdChange={setCreateIdentityId}
+                                    status={createStatus} onStatusChange={setCreateStatus} payload={payload} onPayloadChange={setPayload} />
                             </div>
                         )}
                         {needsPayload && !isUserCreate && (

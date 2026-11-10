@@ -46,7 +46,14 @@ const buildScimUserPatchFrom = (scimUser, local = {}) => buildScimUserPatch({
     address:    scimUser.addresses?.find(a => a.primary) || scimUser.addresses?.[0] || SAMPLE_ADDRESS,
 });
 
-// Users.create is a placeholder: the SCIM client renders the create body from a template (see UserCreateForm)
+// PatchOp that replaces every attribute of a SCIM User resource (e.g. an identity's mapped SCIM payload,
+// to bring the SCIM user back in line with the identity). schemas is not an attribute.
+const buildScimReplacePatch = (resource) => ({
+    schemas: ['urn:ietf:params:scim:schemas:core:2.0:PatchOp'],
+    Operations: Object.entries(resource).filter(([k]) => k !== 'schemas').map(([path, value]) => ({ op: 'replace', path, value })),
+});
+
+// Users.create is a placeholder: the SCIM client builds the create body from an identity (see CredentialCreateForm)
 const getScimDefaultPayload =(resourceType, action) => {
     const ts = Date.now();
     const defaults = {

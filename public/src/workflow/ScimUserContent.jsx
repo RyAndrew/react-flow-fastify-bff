@@ -1,8 +1,9 @@
 // SCIM operations for one local user, run in place from a user node or Read Users.
 // Finds the user on the chosen server (stored scim_id, else userName = login/email),
 // then offers Get / Patch / Set Password / Activate-Deactivate / Delete, or Create if not found.
-// The local row is read from the DB on open and after every write (the BFF updates it), so the
-// create payload is built from what is stored, and the canvas node is given the new row.
+// The local row is read from the DB on open and after every write (the BFF updates its SCIM columns),
+// and the canvas node is given the new row. Create and Patch start from the identity, mapped to SCIM by
+// the BFF, so the SCIM user matches the Okta user built from the same identity.
 const SCIM_USER_OPS = [
     { key: 'get',      label: 'Get',          color: 'info' },
     { key: 'patch',    label: 'Patch',        color: 'secondary' },
@@ -45,7 +46,6 @@ const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser
     };
 
     const userName = user ? (user.login || user.email) : '';
-    const createPerson = React.useMemo(() => (user ? personFromRow(user) : null), [user]);
 
     const resolve = async (sid = serverId) => {
         if (!sid || !user) return;
@@ -72,8 +72,12 @@ const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser
     // Prefill per operation from the resolved user (not clearing result: it changes after a successful op)
     React.useEffect(() => {
         setPassword(''); setConfirm(''); setShowPassword(false);
-        // Create (no SCIM user) is filled by UserCreateForm
-        if (scimUser && op === 'patch') setPayload(JSON.stringify(buildScimUserPatchFrom(scimUser, user), null, 2));
+        // Create (no SCIM user) is filled by CredentialPayloadForm; Patch replaces every attribute with the identity's
+        if (scimUser && op === 'patch') {
+            apiPost('/api/v1/identities/payload/scim', { id: user.id }).then(({ ok, data }) => {
+                setPayload(ok ? JSON.stringify(buildScimReplacePatch(data.payload), null, 2) : JSON.stringify(buildScimUserPatchFrom(scimUser, user), null, 2));
+            });
+        }
     }, [op, scimUser]);
 
     // path defaults to this SCIM user (or Users for a create)
@@ -159,7 +163,7 @@ const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser
                         )}
                         {op === 'patch' && (
                             <div className="mb-2">
-                                <label className="form-label small fw-bold">PatchOp body:</label>
+                                <label className="form-label small fw-bold">PatchOp body <span className="text-muted fw-normal">(prefilled: set every attribute to the identity's value)</span>:</label>
                                 <textarea className="form-control font-monospace mb-2" rows={10} style={{ fontSize: '0.8rem' }}
                                     value={payload} onChange={e => setPayload(e.target.value)} />
                                 <button className="btn btn-secondary btn-sm" disabled={running} onClick={() => runPayload('PATCH')}>Execute Patch</button>
@@ -191,8 +195,8 @@ const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser
                 ) : serverId ? (
                     <div className="mb-2">
                         <p className="small mb-2">No user with userName <code>{userName}</code> on this server. Create it:</p>
-                        <UserCreateForm target="scim" payload={payload} onPayloadChange={setPayload}
-                            status={createStatus} onStatusChange={setCreateStatus} person={createPerson} rows={10} />
+                        <CredentialPayloadForm target="scim" source={{ id: user.id }} payload={payload} onPayloadChange={setPayload}
+                            status={createStatus} onStatusChange={setCreateStatus} rows={10} />
                         <button className="btn btn-success btn-sm mt-2" disabled={running} onClick={runCreate}>Create on SCIM</button>
                     </div>
                 ) : null}

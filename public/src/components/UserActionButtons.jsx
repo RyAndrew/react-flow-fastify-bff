@@ -20,7 +20,7 @@ const UserActionButtons = ({ user, onOpenModal, onUserChanged }) => (
         {/* Identity without an Okta credential: create one for it */}
         {!user.okta_id && (
             <button className="btn btn-success btn-sm text-nowrap"
-                onClick={() => onOpenModal('credential', { initialImportedId: user.id })}>
+                onClick={() => onOpenModal('credential', { initialIdentityId: user.id })}>
                 Create Okta credential
             </button>
         )}
@@ -34,6 +34,9 @@ const UserActionButtons = ({ user, onOpenModal, onUserChanged }) => (
         ))}
         <button className="btn btn-outline-info btn-sm text-nowrap" onClick={() => onOpenModal('scim_user', { user })}>
             SCIM
+        </button>
+        <button className="btn btn-outline-secondary btn-sm text-nowrap" onClick={() => onOpenModal('edit_identity', { user })}>
+            Edit identity
         </button>
         <button className="btn btn-outline-danger btn-sm text-nowrap"
             disabled={!!(user.okta_id || user.scim_id)}
