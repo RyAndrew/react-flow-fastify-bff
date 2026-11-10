@@ -1,7 +1,7 @@
 import { db } from '../db.js';
 import { requireSession } from '../lib/auth-guards.js';
 import { callScimDownstream } from '../lib/downstream.js';
-import { fromScim, saveUser, SCIM_UNLINK } from '../lib/user-store.js';
+import { fromScim, identityFromScim, saveUser, scimUnlink } from '../lib/user-store.js';
 
 export default async function scimRoutes(fastify) {
   fastify.addHook('preHandler', requireSession);
@@ -56,13 +56,40 @@ export default async function scimRoutes(fastify) {
     return response.ok ? data : null;
   };
 
+  // SCIM users just read on this server: refresh the SCIM columns of the rows already linked to them.
+  // Never inserts: a SCIM user becomes a local identity only through Create or Import. Returns the
+  // row when exactly one user was read and it is linked.
+  const syncLinked = async (server, users) => {
+    const list = users.filter(u => u?.id);
+    if (!list.length) return null;
+    const linked = new Set(await db('users').where({ scim_server_id: server.id }).whereIn('scim_id', list.map(u => u.id)).pluck('scim_id'));
+    let row = null;
+    for (const u of list) {
+      if (linked.has(u.id)) row = await saveUser({ scim_server_id: server.id, scim_id: u.id }, fromScim(u, server.id));
+    }
+    return list.length === 1 ? row : null;
+  };
+
   // ─── Users ────────────────────────────────────────────────────
 
-  fastify.get('/Users', (req, reply) => proxy(req, reply, 'GET', '/scim/v2/Users', null));
-  fastify.get('/Users/:id', (req, reply) => proxy(req, reply, 'GET', `/scim/v2/Users/${req.params.id}`, null));
+  fastify.get('/Users', async (request, reply) => {
+    const server = await loadServer(request, reply);
+    if (!server) return reply;
+    const { response, data } = await forward(request, server, 'GET', '/scim/v2/Users', null);
+    if (response.ok && Array.isArray(data?.Resources)) await syncLinked(server, data.Resources);
+    return send(reply, response, data);
+  });
 
-  // POST /Users — create; ?localId= links the new SCIM user to that local row (e.g. the Okta user it was
-  // built from), else it is saved as a new row with source 'scim'
+  fastify.get('/Users/:id', async (request, reply) => {
+    const server = await loadServer(request, reply);
+    if (!server) return reply;
+    const { response, data } = await forward(request, server, 'GET', `/scim/v2/Users/${request.params.id}`, null);
+    const localUser = response.ok && data?.id ? await syncLinked(server, [data]) : null;
+    return sendWithLocal(reply, response, data, localUser);
+  });
+
+  // POST /Users — create a SCIM credential; ?localId= is the local identity (row) it belongs to, whose
+  // identity attributes are kept. Without it, a new row (source 'scim') takes its identity from the response.
   fastify.post('/Users', async (request, reply) => {
     const server = await loadServer(request, reply);
     if (!server) return reply;
@@ -72,7 +99,7 @@ export default async function scimRoutes(fastify) {
 
     const fields = fromScim(data, server.id);
     const localUser = (localId && await saveUser({ id: localId, scim_id: null }, fields))
-      || await saveUser({ scim_server_id: server.id, scim_id: data.id }, fields, { insert: { source: 'scim' } });
+      || await saveUser({ scim_server_id: server.id, scim_id: data.id }, fields, { insert: { source: 'scim', identity: identityFromScim(data) } });
     return sendWithLocal(reply, response, data, localUser);
   });
 
@@ -98,19 +125,19 @@ export default async function scimRoutes(fastify) {
     return sendWithLocal(reply, response, data, localUser);
   });
 
-  // DELETE /Users/:id — the local row is kept, with its SCIM link cleared
+  // DELETE /Users/:id — the local identity is kept, with its SCIM link cleared
   fastify.delete('/Users/:id', async (request, reply) => {
     const server = await loadServer(request, reply);
     if (!server) return reply;
     const { id } = request.params;
     const { response, data } = await forward(request, server, 'DELETE', `/scim/v2/Users/${id}`, null);
     const gone = response.ok || response.status === 404;
-    const localUser = gone ? await saveUser({ scim_server_id: server.id, scim_id: id }, SCIM_UNLINK) : null;
+    const localUser = gone ? await saveUser({ scim_server_id: server.id, scim_id: id }, scimUnlink()) : null;
     return sendWithLocal(reply, response, data, localUser);
   });
 
-  // POST /Users/:id/import — fetch a SCIM user and add (or refresh) it in the local users table
-  // ?localId= — local row (e.g. an Okta user) the SCIM user was created from: link it instead of inserting a new row
+  // POST /Users/:id/import — fetch a SCIM user and add it as a local identity (or refresh its SCIM columns)
+  // ?localId= — local identity the SCIM user belongs to: link it instead of inserting a new row
   fastify.post('/Users/:id/import', async (request, reply) => {
     const server = await loadServer(request, reply);
     if (!server) return reply;
@@ -123,7 +150,7 @@ export default async function scimRoutes(fastify) {
     const fields = fromScim(data, server.id);
     const { localId } = request.query;
     const user = (localId && await saveUser({ id: localId, scim_id: null }, fields))
-      || await saveUser({ scim_server_id: server.id, scim_id: data.id }, fields, { insert: { source: 'scim' } });
+      || await saveUser({ scim_server_id: server.id, scim_id: data.id }, fields, { insert: { source: 'scim', identity: identityFromScim(data) } });
     return { ok: true, user };
   });
 

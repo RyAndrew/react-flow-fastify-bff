@@ -13,6 +13,7 @@ import scimRoutes from './routes/scim.js';
 import scimServerRoutes from './routes/scim-servers.js';
 import nameRoutes from './routes/names.js';
 import templateRoutes from './routes/templates.js';
+import identityRoutes from './routes/identities.js';
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ await fastify.register(scimRoutes, { prefix: '/api/v1/scim' });
 await fastify.register(scimServerRoutes, { prefix: '/api/v1/scim-servers' });
 await fastify.register(nameRoutes, { prefix: '/api/v1/names' });
 await fastify.register(templateRoutes, { prefix: '/api/v1/templates' });
+await fastify.register(identityRoutes, { prefix: '/api/v1/identities' });
 
 // Serve the SPA
 fastify.get('/', (_request, reply) => {

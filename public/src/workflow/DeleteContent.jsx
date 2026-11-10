@@ -31,7 +31,7 @@ const DeleteContent = ({ onClose, initialUserId, onUserChanged }) => {
         const { ok, data } = await api(`/api/v1/users/${selectedId}`, { method: 'DELETE' });
         setRunning(null);
         if (ok) {
-            // localUser is the row kept (still linked to SCIM, Okta link cleared); null when the row was deleted
+            // localUser is the identity row, kept with its Okta link cleared
             setResult({ action: 'delete', data, kept: !!data.localUser });
             if (data.localUserId) onUserChanged(data.localUserId, data.localUser);
             setSelectedId(''); loadUsers();
@@ -59,7 +59,7 @@ const DeleteContent = ({ onClose, initialUserId, onUserChanged }) => {
                     <p className="small text-muted">Current status: <StatusBadge status={selectedUser.status} /></p>
                 )}
                 {result && <div className="text-success fw-bold">&#10003; {result.action} completed</div>}
-                {result?.kept && <p className="small text-muted mt-1 mb-0">The local record is kept: it is still linked to a SCIM user.</p>}
+                {result?.kept && <p className="small text-muted mt-1 mb-0">The local identity is kept; only its Okta link was removed.</p>}
                 {error && <ApiError data={error} />}
             </div>
             <div className="modal-footer">
