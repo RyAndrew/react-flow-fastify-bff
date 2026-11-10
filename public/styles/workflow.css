@@ -1,5 +1,6 @@
 .react-flow__node { padding: 10px; border-radius: 8px; border: 2px solid #ddd; background: white; font-weight: 500; }
-.react-flow__node.create { border-color: #28a745; background: #d4edda; }
+.react-flow__node.identity { border-color: #20c997; background: #d2f4ea; }
+.react-flow__node.credential { border-color: #28a745; background: #d4edda; }
 .react-flow__node.import { border-color: #6f42c1; background: #e2d9f3; }
 .react-flow__node.read { border-color: #0dcaf0; background: #cff4fc; }
 .react-flow__node.update { border-color: #007bff; background: #cfe2ff; }

@@ -1,4 +1,4 @@
-const ReadUsersContent = ({ onClose, onOpenModal, onShowUser }) => {
+const ReadUsersContent = ({ onClose, onOpenModal, onShowUser, onUserChanged }) => {
     const [users, setUsers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
     const [selectedId, setSelectedId] = React.useState('');
@@ -11,6 +11,13 @@ const ReadUsersContent = ({ onClose, onOpenModal, onShowUser }) => {
 
     // selectedId is the local row id: SCIM imports not yet created in Okta have no okta_id
     const selectedUser = users.find(u => u.id === selectedId);
+
+    // A row changed or was deleted from the toolbar: update the canvas, then the list
+    const handleUserChanged = (localId, row) => {
+        onUserChanged(localId, row);
+        if (!row) setSelectedId('');
+        loadUsers();
+    };
 
     return (
         <>
@@ -25,7 +32,7 @@ const ReadUsersContent = ({ onClose, onOpenModal, onShowUser }) => {
                                     onClick={() => { onShowUser(selectedUser); onClose(); }}>
                                     Show
                                 </button>
-                                <UserActionButtons user={selectedUser} onOpenModal={onOpenModal} />
+                                <UserActionButtons user={selectedUser} onOpenModal={onOpenModal} onUserChanged={handleUserChanged} />
                             </div>
                         </>
                     ) : (
@@ -37,7 +44,7 @@ const ReadUsersContent = ({ onClose, onOpenModal, onShowUser }) => {
                 {loading ? (
                     <div className="text-center py-3"><div className="spinner-border text-primary" /></div>
                 ) : !users.length ? (
-                    <div className="alert alert-warning mb-0">No users found. Create a user first.</div>
+                    <div className="alert alert-warning mb-0">No users found. Create an identity first.</div>
                 ) : (
                     <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
                         <table className="table table-sm table-hover mb-0">
@@ -66,10 +73,10 @@ const ReadUsersContent = ({ onClose, onOpenModal, onShowUser }) => {
                                         <td className="small">{u.email}</td>
                                         <td className="small">{[u.profile?.title, u.profile?.department].filter(Boolean).join(' · ') || '—'}</td>
                                         <td title={u.okta_id ? `Okta ID ${u.okta_id}${u.okta_last_updated ? ` · lastUpdated ${fmtTime(u.okta_last_updated)}` : ''}` : 'Not in Okta'}>
-                                            {u.okta_id ? <StatusBadge status={u.status} /> : '—'}
+                                            {u.okta_id ? <><StatusBadge status={u.status} /><div><SyncInfo user={u} system="okta" /></div></> : '—'}
                                         </td>
                                         <td title={u.scim_id ? `Server ${u.scim_server_id} · id ${u.scim_id}${u.scim_last_modified ? ` · lastModified ${fmtTime(u.scim_last_modified)}` : ''}` : 'Not linked to SCIM'}>
-                                            {u.scim_id ? <ScimActiveBadge active={u.scim_active} /> : '—'}
+                                            {u.scim_id ? <><ScimActiveBadge active={u.scim_active} /><div><SyncInfo user={u} system="scim" /></div></> : '—'}
                                         </td>
                                         <td><span className="badge bg-light text-dark border">{u.source}</span></td>
                                         <td className="small text-nowrap">{fmtTime(u.updated_at || u.created_at)}</td>

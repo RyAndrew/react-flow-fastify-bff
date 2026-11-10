@@ -27,6 +27,18 @@ const fmtTime = (v) => {
     return isNaN(d) ? String(v) : d.toLocaleString();
 };
 
+// Timestamp → "just now" / "3m ago" / "2h ago" / "5d ago" (full time in fmtTime), '—' when empty
+const fmtAgo = (v) => {
+    if (!v) return '—';
+    const d = new Date(/^\d{4}-\d\d-\d\d \d/.test(v) ? `${v.replace(' ', 'T')}Z` : v);
+    if (isNaN(d)) return String(v);
+    const s = Math.max(0, (Date.now() - d) / 1000);
+    if (s < 45) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+};
+
 const fmtJson =(v) => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); } catch { return String(v); } };
 
 const generatePassword = (length = 16) => {

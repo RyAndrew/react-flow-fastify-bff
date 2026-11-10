@@ -7,13 +7,21 @@ const USER_ACTIONS = [
     { modal: 'delete',    label: 'Deactivate / Delete', color: 'danger' },
 ];
 
-const UserActionButtons = ({ user, onOpenModal }) => (
+// Deletes an identity with no credential left (the server refuses one still linked to Okta or SCIM)
+const deleteIdentity = async (user, onUserChanged) => {
+    if (!confirm(`Delete the identity ${user.first_name || ''} ${user.last_name || ''} (${user.email})?`)) return;
+    const { ok, data } = await api(`/api/v1/identities/${user.id}`, { method: 'DELETE' });
+    if (!ok) { alert(data?.error || 'Delete failed'); return; }
+    onUserChanged?.(user.id, null);
+};
+
+const UserActionButtons = ({ user, onOpenModal, onUserChanged }) => (
     <>
-        {/* SCIM import not yet in Okta: offer Create, prefilled from the import */}
-        {user.source === 'scim' && !user.okta_id && (
+        {/* Identity without an Okta credential: create one for it */}
+        {!user.okta_id && (
             <button className="btn btn-success btn-sm text-nowrap"
-                onClick={() => onOpenModal('create', { initialImportedId: user.id })}>
-                Create
+                onClick={() => onOpenModal('credential', { initialImportedId: user.id })}>
+                Create Okta credential
             </button>
         )}
         {USER_ACTIONS.map(({ modal, label, color }) => (
@@ -26,6 +34,12 @@ const UserActionButtons = ({ user, onOpenModal }) => (
         ))}
         <button className="btn btn-outline-info btn-sm text-nowrap" onClick={() => onOpenModal('scim_user', { user })}>
             SCIM
+        </button>
+        <button className="btn btn-outline-danger btn-sm text-nowrap"
+            disabled={!!(user.okta_id || user.scim_id)}
+            title={user.okta_id || user.scim_id ? 'Delete its Okta and SCIM users first' : 'Delete this identity (it has no credentials)'}
+            onClick={() => deleteIdentity(user, onUserChanged)}>
+            Delete identity
         </button>
     </>
 );

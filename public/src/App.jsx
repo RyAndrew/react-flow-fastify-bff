@@ -45,13 +45,20 @@ const App = () => {
         openScim(NODE_SCIM_PRESETS[nodeId] || null);
     }, [openScim]);
 
+    // Workflow steps: Create Identity (who the person is) → Create Credential (an Okta account bound to an
+    // identity) → manage. Import brings in an identity with its existing Okta credential.
+    const stepNode = (id, label, x, y) => ({
+        id, type: 'custom', position: { x, y }, className: id,
+        data: { label, hasScim: !!NODE_SCIM_PRESETS[id], onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate },
+    });
     const initialNodes = [
-        { id: 'create',  type: 'custom', data: { label: '1. Create User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 50 },  className: 'create' },
-        { id: 'import',  type: 'custom', data: { label: 'Import User',     onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 500, y: 50 },  className: 'import' },
-        { id: 'read',   type: 'custom', data: { label: '2. Read Users',   onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 150 }, className: 'read' },
-        { id: 'update',  type: 'custom', data: { label: '3. Update User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 250 }, className: 'update' },
-        { id: 'lifecycle', type: 'custom', data: { label: '4. Lifecycle', onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 350 }, className: 'lifecycle' },
-        { id: 'delete',  type: 'custom', data: { label: '5. Delete User',  onRun: handleRun, onViewLogs: handleViewLogs, onScimNavigate: handleScimNavigate }, position: { x: 250, y: 450 }, className: 'delete' },
+        stepNode('identity',   'Create Identity',   250, 50),
+        stepNode('import',     'Import User',       500, 50),
+        stepNode('credential', 'Create Credential', 250, 150),
+        stepNode('read',       'Read Users',        250, 250),
+        stepNode('update',     'Update User',       250, 350),
+        stepNode('lifecycle',  'Lifecycle',         250, 450),
+        stepNode('delete',     'Delete User',       250, 550),
     ];
 
     const [nodes, setNodes] = React.useState(initialNodes);
@@ -67,12 +74,21 @@ const App = () => {
         setNodes(ns => ns.filter(n => n.id !== nodeId));
     }, []);
 
+    // A user changed in the local DB: give its node (if one is on the canvas) the stored row, or remove the
+    // node when the row was deleted (row = null). Doesn't add, select or move nodes.
+    const onUserChanged = React.useCallback((localId, row) => {
+        const id = `user-${localId}`;
+        setNodes(ns => (row
+            ? ns.map(n => n.id === id ? { ...n, data: { ...n.data, user: row } } : n)
+            : ns.filter(n => n.id !== id)));
+    }, []);
+
     // Adds a floating user node left of the workflow (or refreshes and selects it if already shown).
     // `user` is a row from the local users table.
     const showUserNode = React.useCallback((user) => {
         const id = `user-${user.id}`;
         setNodes(ns => {
-            const data = { user, onOpenModal: openModal, onRemove: removeNode };
+            const data = { user, onOpenModal: openModal, onRemove: removeNode, onUserChanged };
             if (ns.some(n => n.id === id)) {
                 return ns.map(n => n.id === id ? { ...n, data, selected: true } : { ...n, selected: false });
             }
@@ -82,16 +98,7 @@ const App = () => {
         });
         // Bring the new node into view once React Flow has measured it
         setTimeout(() => flowRef.current?.fitView({ padding: 0.2, duration: 300 }), 50);
-    }, [openModal, removeNode]);
-
-    // A user changed in the local DB: give its node (if one is on the canvas) the stored row, or remove the
-    // node when the row was deleted (row = null). Doesn't add, select or move nodes.
-    const onUserChanged = React.useCallback((localId, row) => {
-        const id = `user-${localId}`;
-        setNodes(ns => (row
-            ? ns.map(n => n.id === id ? { ...n, data: { ...n.data, user: row } } : n)
-            : ns.filter(n => n.id !== id)));
-    }, []);
+    }, [openModal, removeNode, onUserChanged]);
 
     if (isLoading) return <LoadingScreen />;
 
