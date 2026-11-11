@@ -39,8 +39,8 @@ const UserActionButtons = ({ user, onOpenModal, onUserChanged }) => (
             Edit identity
         </button>
         <button className="btn btn-outline-danger btn-sm text-nowrap"
-            disabled={!!(user.okta_id || user.scim_id)}
-            title={user.okta_id || user.scim_id ? 'Delete its Okta and SCIM users first' : 'Delete this identity (it has no credentials)'}
+            disabled={!!(user.okta_id || user.scim_accounts?.length)}
+            title={user.okta_id || user.scim_accounts?.length ? 'Delete its Okta and SCIM users first' : 'Delete this identity (it has no credentials)'}
             onClick={() => deleteIdentity(user, onUserChanged)}>
             Delete identity
         </button>

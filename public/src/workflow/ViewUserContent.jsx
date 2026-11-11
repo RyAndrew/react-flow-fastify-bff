@@ -1,12 +1,12 @@
-// All attributes for one identity: the identity itself next to the copy each system holds (Okta, SCIM),
-// with values that differ from the identity highlighted; then the full Okta user object, the SCIM
-// resource and the local DB row. Opening it reads Okta and SCIM live, which also refreshes the row's
+// All attributes for one identity: the identity itself next to the copy each system holds (Okta, and
+// each SCIM account), with values that differ from the identity highlighted; then the full Okta user
+// object, each SCIM resource and the local DB row. Opening it reads Okta and SCIM live, which also refreshes the row's
 // copies and synced times, so the row is read again afterwards.
 // `user` is the local row the node was created with.
 const ViewUserContent = ({ onClose, onUserChanged, user }) => {
     const [local, setLocal] = React.useState(null);
     const [okta, setOkta] = React.useState(null);   // Okta user object | error response
-    const [scim, setScim] = React.useState(null);   // SCIM user resource | error response
+    const [scim, setScim] = React.useState({});     // account id → { ok, value: SCIM user resource | error response }
     const [attributes, setAttributes] = React.useState([]);
     const [localError, setLocalError] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -24,25 +24,25 @@ const ViewUserContent = ({ onClose, onUserChanged, user }) => {
     };
 
     const load = async () => {
-        setLoading(true); setLocalError(null); setOkta(null); setScim(null);
+        setLoading(true); setLocalError(null); setOkta(null); setScim({});
         const row = (await readLocal()) || user;
         if (!local) setLocal(row);
 
         await Promise.all([
             row.okta_id && api(`/api/v1/users/${encodeURIComponent(row.okta_id)}`)
                 .then(({ ok, data }) => setOkta({ ok, value: ok ? data.user : data })),
-            row.scim_id && row.scim_server_id && api(`/api/v1/scim/Users/${encodeURIComponent(row.scim_id)}`, {
-                headers: { 'X-Scim-Server-Id': String(row.scim_server_id) },
-            }).then(({ ok, data }) => setScim({ ok, value: ok ? data : { error: 'SCIM server error', details: data } })),
+            ...(row.scim_accounts || []).map(a => api(`/api/v1/scim/Users/${encodeURIComponent(a.scim_id)}`, {
+                headers: { 'X-Scim-Server-Id': String(a.scim_server_id) },
+            }).then(({ ok, data }) => setScim(s => ({ ...s, [a.id]: { ok, value: ok ? data : { error: 'SCIM server error', details: data } } })))),
         ]);
-        if (row.okta_id || row.scim_id) await readLocal();
+        if (row.okta_id || row.scim_accounts?.length) await readLocal();
         setLoading(false);
     };
     React.useEffect(() => { load(); }, [user.id]);
 
     // _links (Okta) and meta.location (SCIM) are API navigation, not user attributes
     const oktaRows = okta?.ok ? flattenObject(okta.value).filter(([k]) => !k.startsWith('_links')) : [];
-    const scimRows = scim?.ok ? flattenObject(scim.value).filter(([k]) => k !== 'meta.location') : [];
+    const scimRows = (res) => flattenObject(res.value).filter(([k]) => k !== 'meta.location');
 
     return (
         <>
@@ -62,12 +62,12 @@ const ViewUserContent = ({ onClose, onUserChanged, user }) => {
                             {!local?.okta_id && <p className="small text-muted mb-0">No Okta credential.</p>}
                             {okta && (okta.ok ? <AttributeTable rows={oktaRows} /> : <ApiError data={okta.value} />)}
                         </div>
-                        {local?.scim_id && (
-                            <div className="mb-4">
-                                <h6 className="fw-bold">SCIM <span className="text-muted fw-normal small">server {local.scim_server_id} · id <code>{local.scim_id}</code></span></h6>
-                                {scim && (scim.ok ? <AttributeTable rows={scimRows} /> : <ApiError data={scim.value} />)}
+                        {local?.scim_accounts?.map(a => (
+                            <div key={a.id} className="mb-4">
+                                <h6 className="fw-bold">SCIM — {scimAccountLabel(a)} <span className="text-muted fw-normal small">id <code>{a.scim_id}</code></span></h6>
+                                {scim[a.id] && (scim[a.id].ok ? <AttributeTable rows={scimRows(scim[a.id])} /> : <ApiError data={scim[a.id].value} />)}
                             </div>
-                        )}
+                        ))}
                         <div>
                             <h6 className="fw-bold">Local database record</h6>
                             {localError && <ApiError data={localError} />}
@@ -83,12 +83,14 @@ const ViewUserContent = ({ onClose, onUserChanged, user }) => {
     );
 };
 
-// Identity | Okta | SCIM per identity attribute, from the row's identity / okta_identity / scim_identity
-// (the server maps each system's copy to identity names). A system value that differs is highlighted.
+// Identity | Okta | each SCIM account per identity attribute, from the row's identity / okta_identity /
+// scim_accounts[].identity (the server maps each system's copy to identity names). A system value that differs is highlighted.
 const IdentityComparison = ({ row, attributes }) => {
     const systems = [
-        row.okta_id && { key: 'okta', label: 'Okta', values: row.okta_identity, changedAt: row.okta_last_updated },
-        row.scim_id && { key: 'scim', label: 'SCIM', values: row.scim_identity, changedAt: row.scim_last_modified },
+        row.okta_id && { key: 'okta', label: 'Okta', values: row.okta_identity, changedAt: row.okta_last_updated, syncedAt: row.okta_synced_at, stale: row.okta_stale },
+        ...(row.scim_accounts || []).map(a => ({
+            key: `scim-${a.id}`, label: scimAccountLabel(a), values: a.identity, changedAt: a.last_modified, syncedAt: a.synced_at, stale: a.stale,
+        })),
     ].filter(Boolean);
     const identity = row.identity || {};
     const keys = (attributes.length ? attributes : Object.keys(identity))
@@ -109,7 +111,7 @@ const IdentityComparison = ({ row, attributes }) => {
                         {systems.map((s, i) => (
                             <th key={s.key}>
                                 {s.label}{differs[i] > 0 && <span className="badge bg-warning text-dark ms-1">{differs[i]} differ</span>}
-                                <div className="small fw-normal"><SyncInfo user={row} system={s.key} /></div>
+                                <div className="small fw-normal"><SyncInfo at={s.syncedAt} stale={s.stale} /></div>
                                 {s.changedAt && <div className="small fw-normal text-muted" title={fmtTime(s.changedAt)}>changed there {fmtAgo(s.changedAt)}</div>}
                             </th>
                         ))}

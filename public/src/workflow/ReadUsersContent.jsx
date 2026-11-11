@@ -73,10 +73,16 @@ const ReadUsersContent = ({ onClose, onOpenModal, onShowUser, onUserChanged }) =
                                         <td className="small">{u.email}</td>
                                         <td className="small">{[u.profile?.title, u.profile?.department].filter(Boolean).join(' · ') || '—'}</td>
                                         <td title={u.okta_id ? `Okta ID ${u.okta_id}${u.okta_last_updated ? ` · lastUpdated ${fmtTime(u.okta_last_updated)}` : ''}` : 'Not in Okta'}>
-                                            {u.okta_id ? <><StatusBadge status={u.status} /><div><SyncInfo user={u} system="okta" /></div></> : '—'}
+                                            {u.okta_id ? <><StatusBadge status={u.status} /><div><SyncInfo at={u.okta_synced_at} stale={u.okta_stale} /></div></> : '—'}
                                         </td>
-                                        <td title={u.scim_id ? `Server ${u.scim_server_id} · id ${u.scim_id}${u.scim_last_modified ? ` · lastModified ${fmtTime(u.scim_last_modified)}` : ''}` : 'Not linked to SCIM'}>
-                                            {u.scim_id ? <><ScimActiveBadge active={u.scim_active} /><div><SyncInfo user={u} system="scim" /></div></> : '—'}
+                                        <td title={u.scim_accounts?.length ? '' : 'Not linked to SCIM'}>
+                                            {u.scim_accounts?.length ? u.scim_accounts.map(a => (
+                                                <div key={a.id} className="mb-1"
+                                                    title={`${scimAccountLabel(a)} · id ${a.scim_id}${a.last_modified ? ` · lastModified ${fmtTime(a.last_modified)}` : ''}`}>
+                                                    <ScimActiveBadge active={a.active} label={scimAccountLabel(a)} />
+                                                    <div><SyncInfo at={a.synced_at} stale={a.stale} /></div>
+                                                </div>
+                                            )) : '—'}
                                         </td>
                                         <td><span className="badge bg-light text-dark border">{u.source}</span></td>
                                         <td className="small text-nowrap">{fmtTime(u.updated_at || u.created_at)}</td>

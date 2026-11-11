@@ -1,7 +1,8 @@
 // SCIM operations for one local user, run in place from a user node or Read Users.
-// Finds the user on the chosen server (stored scim_id, else userName = login/email),
+// The identity can have an account on each SCIM server. Finds the user on the chosen server (the
+// account's stored scim_id, else userName = login/email),
 // then offers Get / Patch / Set Password / Activate-Deactivate / Delete, or Create if not found.
-// The local row is read from the DB on open and after every write (the BFF updates its SCIM columns),
+// The local row is read from the DB on open and after every write (the BFF updates its SCIM accounts),
 // and the canvas node is given the new row. Create and Patch start from the identity, mapped to SCIM by
 // the BFF, so the SCIM user matches the Okta user built from the same identity.
 const SCIM_USER_OPS = [
@@ -16,7 +17,7 @@ const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser
     const [user, setUser] = React.useState(null);              // local users row, from the DB
     const [userError, setUserError] = React.useState(null);
     const [servers, setServers] = React.useState([]);
-    const [serverId, setServerId] = React.useState(initialUser.scim_server_id ? String(initialUser.scim_server_id) : '');
+    const [serverId, setServerId] = React.useState(initialUser.scim_accounts?.[0] ? String(initialUser.scim_accounts[0].scim_server_id) : '');
     const [resolving, setResolving] = React.useState(false);
     const [scimUser, setScimUser] = React.useState(null);   // SCIM resource, or null when not found
     const [resolveError, setResolveError] = React.useState(null);
@@ -51,8 +52,9 @@ const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser
         if (!sid || !user) return;
         setResolving(true); setResolveError(null); setScimUser(null);
         let res;
-        if (user.scim_id && String(user.scim_server_id) === String(sid)) {
-            res = await scimRequest(sid, 'GET', `Users/${encodeURIComponent(user.scim_id)}`);
+        const account = scimAccountFor(user, sid);
+        if (account) {
+            res = await scimRequest(sid, 'GET', `Users/${encodeURIComponent(account.scim_id)}`);
             if (res.ok) setScimUser(res.data);
         } else {
             for (const name of [...new Set([userName, user.email])]) {
@@ -126,7 +128,7 @@ const ScimUserContent = ({ onClose, onOpenScim, onUserChanged, user: initialUser
                     <label className="form-label mb-0 small fw-bold text-nowrap">SCIM Server:</label>
                     <select className="form-select form-select-sm" value={serverId} onChange={e => setServerId(e.target.value)}>
                         {!servers.length && <option value="">— no servers configured —</option>}
-                        {servers.map(s => <option key={s.id} value={s.id}>{s.name} — {s.url}</option>)}
+                        {servers.map(s => <option key={s.id} value={s.id}>{scimAccountFor(user, s.id) ? '✓ ' : ''}{s.name} — {s.url}</option>)}
                     </select>
                     {scimUser && (
                         <button className="btn btn-link btn-sm text-nowrap"

@@ -54,18 +54,20 @@ const CredentialPayloadForm = ({ target, source, status, onStatusChange, payload
     );
 };
 
-// Pick the identity a new credential belongs to (a stored identity without one on this target, or a new
-// identity typed inline), then the payload for it. Used by Create Credential (Okta) and the SCIM client.
+// Pick the identity a new credential belongs to (a stored identity without one on this target — for SCIM,
+// without an account on serverId — or a new identity typed inline), then the payload for it. Used by
+// Create Credential (Okta) and the SCIM client.
 // The parent owns identityId ('' = new identity), status and payload; with a new identity, the row is
 // created by the BFF from what the system returns.
-const CredentialCreateForm = ({ target, identityId, onIdentityIdChange, status, onStatusChange, payload, onPayloadChange, rows = 10 }) => {
+const CredentialCreateForm = ({ target, serverId, identityId, onIdentityIdChange, status, onStatusChange, payload, onPayloadChange, rows = 10 }) => {
     const [identities, setIdentities] = React.useState(null);
     const [newIdentity, setNewIdentity] = React.useState(null);
-    const linkColumn = target === 'okta' ? 'okta_id' : 'scim_id';
+    const hasCredential = (u) => (target === 'okta' ? !!u.okta_id : !!scimAccountFor(u, serverId));
 
     React.useEffect(() => {
-        api('/api/v1/users?scope=all').then(({ data }) => setIdentities((data.users || []).filter(u => !u[linkColumn])));
-    }, [target]);
+        setIdentities(null);
+        api('/api/v1/users?scope=all').then(({ data }) => setIdentities((data.users || []).filter(u => !hasCredential(u))));
+    }, [target, serverId]);
 
     const source = identityId ? { id: identityId } : (newIdentity ? { identity: newIdentity } : null);
     const selected = identities?.find(u => String(u.id) === String(identityId));

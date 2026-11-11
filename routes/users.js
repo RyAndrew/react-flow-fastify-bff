@@ -1,7 +1,7 @@
 import { db } from '../db.js';
 import { requireAccessToken } from '../lib/auth-guards.js';
 import { callDownstream } from '../lib/downstream.js';
-import { fromOkta, getUser, identityFromOkta, oktaUnlink, saveUser, serializeUser } from '../lib/user-store.js';
+import { fromOkta, getUser, identityFromOkta, listUsers, oktaUnlink, saveUser } from '../lib/user-store.js';
 
 export default async function userRoutes(fastify) {
   const downstreamApiUrl = 'http://127.0.0.1:3000';
@@ -32,13 +32,15 @@ export default async function userRoutes(fastify) {
   // Default: only users linked to Okta (have an okta_id).
   // ?source=created|okta|scim — filter by how the user got into the DB
   // ?scope=all — every row, including SCIM imports not yet created in Okta
+  // ?scim_server_id= — rows with an account on that SCIM server (whatever their source)
   fastify.get('/', async (request) => {
-    const { source, scope } = request.query;
+    const { source, scope, scim_server_id } = request.query;
     let query = db('users').select('*').orderBy('created_at', 'desc');
-    if (source) query = query.where({ source });
+    if (scim_server_id) {
+      query = query.whereExists(db('scim_accounts').where({ scim_server_id }).whereRaw('scim_accounts.user_id = users.id'));
+    } else if (source) query = query.where({ source });
     else if (scope !== 'all') query = query.whereNotNull('okta_id');
-    const users = await query;
-    return { users: users.map(serializeUser) };
+    return { users: await listUsers(query) };
   });
 
   // GET /okta/search — search Okta users

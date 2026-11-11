@@ -70,7 +70,7 @@ const EditIdentityContent = ({ onClose, onUserChanged, user }) => {
             <div className="modal-body">
                 <p className="small text-muted">
                     Changes the local identity only.
-                    {(user.okta_id || user.scim_id) && ' Its Okta / SCIM users keep their values and show as stale until they are updated.'}
+                    {(user.okta_id || user.scim_accounts?.length > 0) && ' Its Okta / SCIM users keep their values and show as stale until they are updated.'}
                 </p>
                 <IdentityForm initial={user.identity} onChange={(v) => { setIdentity(v); setSaved(false); }} />
                 {error && <div className="mt-2"><ApiError data={error} /></div>}

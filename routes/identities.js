@@ -42,7 +42,8 @@ export default async function identityRoutes(fastify) {
   fastify.delete('/:id', async (request, reply) => {
     const row = await db('users').where({ id: request.params.id }).first();
     if (!row) return reply.status(404).send({ error: `Identity ${request.params.id} not found` });
-    if (row.okta_id || row.scim_id) {
+    const scimAccount = await db('scim_accounts').where({ user_id: row.id }).first('id');
+    if (row.okta_id || scimAccount) {
       return reply.status(409).send({ error: 'Identity still has a credential: delete its Okta user and SCIM user first' });
     }
     await db('users').where({ id: row.id }).del();

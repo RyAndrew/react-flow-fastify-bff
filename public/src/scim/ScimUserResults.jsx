@@ -7,10 +7,11 @@ const ScimUserResults = ({ response, serverId, onShowUser, onGoToCanvas }) => {
 
     React.useEffect(() => {
         setSaving({});
-        api('/api/v1/users?source=scim').then(({ data }) => {
+        if (!serverId) { setSavedIds(new Set()); return; }
+        api(`/api/v1/users?scim_server_id=${encodeURIComponent(serverId)}`).then(({ data }) => {
             setSavedIds(new Set((data.users || [])
-                .filter(u => String(u.scim_server_id) === String(serverId))
-                .map(u => u.scim_id)));
+                .map(u => scimAccountFor(u, serverId)?.scim_id)
+                .filter(Boolean)));
         });
     }, [response, serverId]);
 

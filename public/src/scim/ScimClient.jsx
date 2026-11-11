@@ -360,7 +360,7 @@ const ScimClient = ({ preset, onClearPreset, serverId, onServerIdChange, onShowU
                         {/* Payload editor: Create User builds the payload from an identity */}
                         {isUserCreate && (
                             <div className="mb-3">
-                                <CredentialCreateForm target="scim" identityId={createIdentityId} onIdentityIdChange={setCreateIdentityId}
+                                <CredentialCreateForm target="scim" serverId={serverId} identityId={createIdentityId} onIdentityIdChange={setCreateIdentityId}
                                     status={createStatus} onStatusChange={setCreateStatus} payload={payload} onPayloadChange={setPayload} />
                             </div>
                         )}

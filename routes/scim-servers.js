@@ -38,11 +38,16 @@ export default async function scimServerRoutes(fastify) {
     return { server };
   });
 
-  // DELETE /:id — delete a server
+  // DELETE /:id — delete a server and the local accounts linked to it (the identities are kept)
   fastify.delete('/:id', async (request, reply) => {
     const { id } = request.params;
-    const count = await db('scim_servers').where({ id }).del();
-    if (!count) return reply.status(404).send({ error: 'Server not found' });
-    return { ok: true };
+    const server = await db('scim_servers').where({ id }).first('id');
+    if (!server) return reply.status(404).send({ error: 'Server not found' });
+    const accounts = await db.transaction(async (trx) => {
+      const n = await trx('scim_accounts').where({ scim_server_id: id }).del();
+      await trx('scim_servers').where({ id }).del();
+      return n;
+    });
+    return { ok: true, accountsRemoved: accounts };
   });
 }
