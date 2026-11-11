@@ -6,7 +6,7 @@ const UserNode = ({ id, data }) => {
         <>
             <ReactFlow.NodeToolbar position="top">
                 <div className="d-flex gap-2">
-                    <button className="btn btn-sm btn-info text-nowrap" onClick={() => onOpenModal('view_user', { user })}>👁 View</button>
+                    <button className="btn btn-sm btn-info text-nowrap" onClick={() => onOpenModal('view_user', { user })}>View</button>
                     <UserActionButtons user={user} onOpenModal={onOpenModal} onUserChanged={onUserChanged} />
                     <button className="btn btn-sm btn-outline-secondary" title="Remove from canvas" onClick={() => onRemove(id)}>✕</button>
                 </div>
@@ -17,12 +17,12 @@ const UserNode = ({ id, data }) => {
             <div className="d-flex flex-wrap justify-content-center gap-1 mt-1">
                 <span className="badge bg-light text-dark border">{user.source}</span>
                 {user.okta_id && <StatusBadge status={user.status} />}
-                {user.scim_id && <ScimActiveBadge active={user.scim_active} />}
+                {user.scim_accounts?.map(a => <ScimActiveBadge key={a.id} active={a.active} label={scimAccountLabel(a)} />)}
             </div>
-            {(user.okta_id || user.scim_id) && (
+            {(user.okta_id || user.scim_accounts?.length > 0) && (
                 <div className="d-flex flex-column mt-1" style={{ lineHeight: 1.2 }}>
-                    {user.okta_id && <SyncInfo user={user} system="okta" label="Okta" />}
-                    {user.scim_id && <SyncInfo user={user} system="scim" label="SCIM" />}
+                    {user.okta_id && <SyncInfo at={user.okta_synced_at} stale={user.okta_stale} label="Okta" />}
+                    {user.scim_accounts?.map(a => <SyncInfo key={a.id} at={a.synced_at} stale={a.stale} label={scimAccountLabel(a)} />)}
                 </div>
             )}
         </>
